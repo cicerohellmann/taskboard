@@ -51,7 +51,7 @@ The AI can't say which ones. The References below are the docs for each tool tb 
 
 ## Tools like this one
 
-We looked for tools like tb after it was built. We did not want to make something that already exists.
+We looked for tools like tb while it was being built. We did not want to make something that already exists.
 
 Short answer: no tool we found does the whole thing. There are two groups:
 
