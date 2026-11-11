@@ -1,0 +1,568 @@
+#!/usr/bin/env bash
+# gboard: pick Gradle commands, then modules and tests for each, then run them all in one build.
+# Run it from anywhere inside a Gradle repo that has ./gradlew. https://github.com/cicerohellmann/gboard
+#   gboard          open the menu
+#   gboard last     rerun the previous command
+#   gboard hist     pick from previously run commands
+#   gboard init     write a .gboard file in this repo to edit its command list
+#   gboard refresh  re-read the module list from Gradle
+#   gboard help     the commands that don't open anything (print, run, list...), for scripts and AI agents
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+cd "$root"
+[ -x ./gradlew ] || { echo "No ./gradlew in $root"; exit 1; }
+
+history_file="$HOME/.gboard_history"
+touch "$history_file"
+
+run() {
+  echo
+  echo "▶ $1"
+  echo
+  printf '%s\t%s\n' "$root" "$1" >> "$history_file"
+  eval "$1"
+}
+
+# One plain arrow for the cursor and + for TAB-ticked rows. fzf's default bars (gutter, pointer and
+# marker) are all slightly different widths, so the left edge seemed to change thickness while scrolling.
+fzf_style=(--pointer='▶' --marker='+')
+grep -q -- '--gutter=' <<< "$(fzf --help 2>/dev/null || true)" && fzf_style+=(--gutter=' ')   # newer fzf only
+pick() { fzf "${fzf_style[@]}" --height=80% --layout=reverse --border --ansi "$@"; }
+
+case "${1:-}" in
+  last)
+    cmd=$(awk -F'\t' -v r="$root" '$1==r{c=$2} END{print c}' "$history_file")
+    [ -n "$cmd" ] || { echo "Nothing run here yet"; exit 1; }
+    run "$cmd"; exit ;;
+  hist)
+    cmd=$(awk -F'\t' -v r="$root" '$1==r{print $2}' "$history_file" | awk '{ l[NR]=$0 } END { for (i=NR; i>0; i--) print l[i] }' | awk '!seen[$0]++' \
+      | pick --prompt="history > ") || exit 0
+    run "$cmd"; exit ;;
+  history) awk -F'\t' -v r="$root" '$1==r{print $2}' "$history_file" | awk '!seen[$0]++' | tail -20; exit ;;
+esac
+
+# The command list. Each repo can have its own in a .gboard file (gboard init writes one to start from),
+# otherwise ~/.config/gboard/commands, otherwise this default.
+default_commands='# step | label | gradle task | where | auto
+#
+# step   order things run in, whatever order they are ticked in:
+#        1 clean · 2 changes files · 3 checks · 4 tests · 5 build · 6 reports
+#        steps 1-2 run as their own build first, so nothing reads files they are still changing
+# where  module = you pick the modules · root = whole project, just a tick · :app = always that module
+# auto   "auto" = added by ★ Auto, on the modules changed on this branch
+#
+# AI agents: use these task names instead of guessing. `gboard print detekt testDebugUnitTest=changed` gives the
+# exact command (`gboard help` for more). By hand: ./gradlew root tasks as they are, module tasks as
+# :module:task, fixed ones as :app:task; steps 1-2 in their own ./gradlew run before the rest.
+3 | Android lint                        | lintDebug                 | module | auto
+4 | Unit tests                          | testDebugUnitTest         | module | auto
+4 | Instrumented tests (needs a device) | connectedDebugAndroidTest | module
+5 | Build debug APK                     | assembleDebug             | :app
+5 | Install debug APK on device         | installDebug              | :app
+5 | Build release APK                   | assembleRelease           | :app
+1 | Clean                               | clean                     | root
+#
+# Popular extras: uncomment the ones this project has
+# 3 | Detekt (static analysis)          | detekt                    | root   | auto
+# 3 | Ktlint: check formatting          | ktlintCheck               | root   | auto
+# 2 | Ktlint: fix formatting            | ktlintFormat              | root
+# 3 | Spotless: check formatting        | spotlessCheck             | root   | auto
+# 2 | Spotless: fix formatting          | spotlessApply             | root
+# 4 | Screenshot tests: verify          | verifyPaparazziDebug      | module | auto
+# 2 | Screenshot tests: record          | recordPaparazziDebug      | module
+# 4 | Screenshot tests: verify          | verifyRoborazziDebug      | module | auto
+# 2 | Screenshot tests: record          | recordRoborazziDebug      | module
+# 6 | Coverage report                   | koverHtmlReport           | root'
+
+if [ "${1:-}" = init ]; then
+  [ -e .gboard ] && { echo "$root/.gboard already exists"; exit 1; }
+  printf '%s\n' "$default_commands" > .gboard
+  echo "Wrote $root/.gboard. Edit it to match this project's Gradle tasks."
+  exit 0
+fi
+
+config="$root/.gboard"; [ -f "$config" ] || config="$HOME/.config/gboard/commands"
+if [ -f "$config" ]; then command_source=$(cat "$config"); else command_source=$default_commands; fi
+# label <TAB> task <TAB> where <TAB> step <TAB> auto
+commands=$(printf '%s\n' "$command_source" | awk -F'|' '
+  /^[[:space:]]*(#|$)/ { next }
+  { for (i=1; i<=NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
+    if (NF < 4) next
+    printf "%s\t%s\t%s\t%s\t%s\n", $2, $3, $4, $1, $5 }')
+[ -n "$commands" ] || { echo "No commands in $config"; exit 1; }
+
+# Modules come from Gradle itself (includes modules registered by code), cached until the settings change
+load_modules() {
+  local cache_dir="$HOME/.cache/gboard" key cache
+  mkdir -p "$cache_dir"
+  cache="$cache_dir/$(printf '%s' "$root" | cksum | cut -d' ' -f1).modules"
+  key=$(cat settings.gradle* 2>/dev/null | cksum | cut -d' ' -f1)
+  if [ "${1:-}" != refresh ] && [ -f "$cache" ] && [ "$(head -1 "$cache")" = "$key" ]; then sed 1d "$cache"; return; fi
+  echo "Reading the module list from Gradle (only after settings change)..." >&2
+  local mods
+  mods=$(./gradlew -q projects 2>/dev/null | sed -nE "s/.*Project '(:[^']+)'.*/\1/p" | awk '!seen[$0]++' || true)
+  if [ -z "$mods" ]; then # Gradle failed: fall back to the include lines
+    mods=$(sed -nE "s/^[[:space:]]*include[[:space:]]*\(?[\"']([^\"']+)[\"'].*/\1/p" settings.gradle* | awk '!seen[$0]++')
+  else
+    printf '%s\n%s\n' "$key" "$mods" > "$cache"
+  fi
+  printf '%s\n' "$mods"
+}
+if [ -n "${GB_STATE:-}" ]; then all_modules=""   # callbacks from inside fzf don't need it
+else all_modules=$(load_modules "${1:-}"); fi
+[ "${1:-}" = refresh ] && { echo "$(printf '%s\n' "$all_modules" | wc -l | tr -d ' ') modules"; exit 0; }
+
+# Modules touched on this branch (vs main): each changed file belongs to the deepest module containing it
+if [ -n "${GB_STATE:-}" ]; then
+  # Called back from inside fzf: reuse what the main process already worked out
+  changed=$GB_CHANGED
+  changed_files=""
+else
+  base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo HEAD)
+  changed_files=$( { git diff --name-only "$base"; git ls-files --others --exclude-standard; } 2>/dev/null)
+  changed=$(awk '
+    NR==FNR { dir=substr($0,2); gsub(":","/",dir); mods[dir]=$0; next }
+    { best=""; for (d in mods) if (index($0, d "/")==1 && length(d)>length(best)) best=d
+      if (best!="" && !seen[best]++) print mods[best] }
+  ' <(printf '%s\n' "$all_modules") <(printf '%s\n' "$changed_files") | sort)
+fi
+
+module_rows=$( {
+  echo "◆ ALL MODULES"
+  [ -n "$changed" ] && printf '%s\n' "$changed" | sed 's/^/★ /'
+  printf '%s\n' "$all_modules" | grep -vxF -f <(printf '%s\n' "$changed") || true
+} | sed '/^$/d')
+
+# fzf can't preselect rows, so tick them on start by position
+preselect() {
+  local rows=$1 selected=$2 binds="" i=0
+  [ -n "$selected" ] || return 0
+  while IFS= read -r row; do
+    i=$((i + 1))
+    grep -qxF -- "$row" <<< "$selected" && binds="$binds+pos($i)+toggle"
+  done <<< "$rows"
+  [ -z "$binds" ] || printf -- '--bind=start:%s+first' "${binds#+}"
+}
+
+# fzf --multi with rows already ticked. ENTER with nothing ticked keeps just the highlighted row.
+pick_multi() {
+  local rows=$1 selected=$2; shift 2
+  local bind; bind=$(preselect "$rows" "$selected")
+  printf '%s\n' "$rows" | pick --multi ${bind:+"$bind"} "$@"
+}
+
+is_test_task() { grep -qE 'UnitTest|Paparazzi' <<< "$1"; }
+
+# display <TAB> module <TAB> class <TAB> 1 if screenshot test, for the given modules
+test_rows() {
+  printf '%s\n' "$1" | sed '/^$/d' | while read -r m; do
+    dir=${m#:}; dir=${dir//://}
+    [ -d "$dir/src/test" ] || continue
+    find "$dir/src/test" -type f \( -name '*Test.kt' -o -name '*Tests.kt' \) | while read -r f; do
+      class=$(basename "$f" .kt)
+      pap=0; grep -qi paparazzi "$f" && pap=1
+      mark="  "; grep -qxF -- "$f" <<< "$changed_files" && mark="★ "
+      icon="   "; [ "$pap" = 1 ] && icon="📸 "
+      printf '%s%s%s  (%s)\t%s\t%s\t%s\n' "$mark" "$icon" "$class" "$m" "$m" "$class" "$pap"
+    done
+  done | sort -r
+}
+
+summary() { # lines -> "a, b, c" (first few)
+  awk -F'\t' -v max="$1" 'NF{ n++; if (n<=max) s = s (s?", ":"") $1 } END{ if (n>max) s = s ", +" n-max " more"; print (n ? s : "none") }'
+}
+
+# The list: one line per added command.
+#   task <TAB> label <TAB> scope <TAB> modules ("ALL" or space separated) <TAB> tests ("module|Class|pap" space separated, empty = all)
+jobs=""
+gradle_prefix="./gradlew --continue --parallel --console=rich"
+
+job_field() { printf '%s\n' "$jobs" | awk -F'\t' -v t="$1" -v n="$2" '$1==t{print $n}'; }
+has_job() { awk -F'\t' -v t="$1" '$1==t { f=1 } END { exit !f }' <<< "$jobs"; }
+remove_job() { jobs=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$1" 'NF && $1!=t'); }
+set_job() { # task label scope modules tests; keeps its place in the list
+  local line; line=$(printf '%s\t%s\t%s\t%s\t%s' "$@")
+  if has_job "$1"; then
+    jobs=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$1" -v l="$line" 'NF{ print ($1==t ? l : $0) }')
+  else
+    jobs=$(printf '%s\n%s' "$jobs" "$line" | sed '/^$/d')
+  fi
+}
+
+job_desc() { # one job line -> "→ :a, :b · 2 tests"
+  printf '%s\n' "$1" | awk -F'\t' '{
+    if ($3=="app") { print "→ :app"; next }
+    if ($3 ~ /^:/) { print "→ " $3; next }
+    if ($3=="root") { print "→ whole project"; next }
+    n=split($4, m, " "); s=""
+    if ($4=="ALL") s="all modules"
+    else for (i=1; i<=n && i<=3; i++) s = s (i>1?", ":"") m[i]
+    if (n>3 && $4!="ALL") s = s ", +" n-3 " more"
+    t=split($5, x, " ")
+    print "→ " s (t ? " · " t (t==1 ? " test class" : " test classes") : "") }'
+}
+
+# Job lines on stdin -> gradle task arguments
+build_tasks() {
+  awk -F'\t' '
+    NF {
+      task=$1; scope=$3
+      if (scope=="app") { out = out " :app:" task; next }
+      if (scope ~ /^:/) { out = out " " scope ":" task; next }
+      if (scope=="root") { out = out " " task; next }
+      nm=split($4, M, " "); nt=split($5, T, " "); s=""
+      # With picked tests, only run the task in modules owning a picked class; screenshot tasks only
+      # get screenshot tests, so Gradle does not fail with "No tests found". --tests applies to the task before it.
+      if (task ~ /UnitTest|Paparazzi/ && nt > 0) {
+        n=0; split("", f); split("", order)
+        for (i=1; i<=nt; i++) {
+          split(T[i], p, "|")
+          if (task ~ /Paparazzi/ && p[3] != 1) continue
+          if (!(p[1] in f)) { order[n++]=p[1]; f[p[1]]="" }
+          f[p[1]] = f[p[1]] " --tests \"*." p[2] "\""
+        }
+        for (i=0; i<n; i++) s = s " " order[i] ":" task f[order[i]]
+      }
+      if (s=="") { if ($4=="ALL") s = " " task; else for (i=1; i<=nm; i++) s = s " " M[i] ":" task }
+      out = out s
+    }
+    END { printf "%s", out }'
+}
+
+# Commands always run by their step, however they were ticked (same step: the order they're listed in).
+# Steps 1-2 (clean, things that change files) run as their own build first: with --parallel Gradle
+# would otherwise start the checks before formatting or cleaning has finished.
+full_command() { # job lines on stdin
+  local sorted first rest
+  sorted=$(awk -F'\t' '
+    NR==FNR { if (NF) { step[$2]=$4+0; rank[$2]=($4+0)*1000+NR } next }
+    NF { printf "%07d\t%d\t%s\n", ($1 in rank ? rank[$1] : 9999999), ($1 in step ? step[$1] : 9), $0 }
+  ' <(printf '%s\n' "$commands") - | sort -n -k1,1)
+  first=$(printf '%s\n' "$sorted" | awk -F'\t' 'NF && $2<=2' | cut -f3- | build_tasks)
+  rest=$(printf '%s\n' "$sorted" | awk -F'\t' 'NF && $2>2' | cut -f3- | build_tasks)
+  if [ -n "$first" ] && [ -n "$rest" ]; then printf '%s%s && %s%s' "$gradle_prefix" "$first" "$gradle_prefix" "$rest"
+  elif [ -n "$first$rest" ]; then printf '%s%s%s' "$gradle_prefix" "$first" "$rest"; fi
+}
+
+confirm() {
+  local choice
+  choice=$(printf '✖ Cancel, back\n✔ Confirm, run it\n' | pick --prompt="run? > " --header="$1") || return 1
+  [ "$choice" = "✔ Confirm, run it" ]
+}
+
+# Pick modules (and test classes) for the given commands. Rows are "task<TAB>label<TAB>scope".
+edit_commands() {
+  local picked=$1 rows sel out mods tests task label scope
+  local mtasks; mtasks=$(printf '%s\n' "$picked" | awk -F'\t' '$3=="module"')
+
+  # Commands without modules (APK, clean...) just toggle on and off
+  while IFS=$'\t' read -r task label scope; do
+    [ -n "$task" ] || continue
+    if has_job "$task"; then remove_job "$task"; else set_job "$task" "$label" "$scope" "" ""; fi
+  done <<< "$(printf '%s\n' "$picked" | awk -F'\t' '$3!="module"')"
+  [ -n "$mtasks" ] || return 0
+
+  local labels; labels=$(printf '%s\n' "$mtasks" | cut -f2 | summary 3)
+  # Start with the modules these commands already have, so opening one again just adds more
+  local existing; existing=$(printf '%s\n' "$mtasks" | cut -f1 | while read -r t; do job_field "$t" 4 | tr ' ' '\n'; done | sed '/^$/d' | awk '!seen[$0]++')
+  rows=$module_rows
+  local any_added=""
+  while read -r t; do has_job "$t" && any_added=1; done <<< "$(printf '%s\n' "$mtasks" | cut -f1)"
+  [ -n "$any_added" ] && rows=$(printf '✖ Remove %s from the list\n%s' "$labels" "$rows")
+  if grep -qx ALL <<< "$existing"; then sel="◆ ALL MODULES"
+  else sel=$(printf '%s\n' "$existing" | while read -r m; do
+      [ -n "$m" ] || continue
+      if grep -qxF -- "$m" <<< "$changed"; then echo "★ $m"; else echo "$m"; fi
+    done); fi
+
+  out=$(pick_multi "$rows" "$sel" --prompt="modules > " \
+    --header="For: $labels
+★ changed on this branch · TAB tick several · type to filter · ENTER next · ESC back") || return 0
+  if grep -q '^✖ Remove' <<< "$out"; then
+    while read -r t; do remove_job "$t"; done <<< "$(printf '%s\n' "$mtasks" | cut -f1)"
+    return 0
+  fi
+  if grep -q "ALL MODULES" <<< "$out"; then mods=ALL
+  else mods=$(printf '%s\n' "$out" | sed 's/^★ //' | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//'); fi
+
+  # Test classes, for test commands (skipped for ALL MODULES: too many to list)
+  tests=$(printf '%s\n' "$mtasks" | cut -f1 | while read -r t; do job_field "$t" 5 | tr ' ' '\n'; done | sed '/^$/d' | awk '!seen[$0]++')
+  if [ "$mods" != ALL ] && awk -F'\t' '$1 ~ /UnitTest|Paparazzi/ { f=1 } END { exit !f }' <<< "$mtasks"; then
+    local trows tsel
+    trows=$(test_rows "$(printf '%s\n' $mods)")
+    tsel=$(printf '%s\n' "$trows" | awk -F'\t' 'NR==FNR{ if (NF) want[$0]=1; next } (($2 "|" $3 "|" $4) in want)' \
+      <(printf '%s\n' "$tests") - )
+    trows=$(printf '◆ ALL tests in these modules\t\t\t\n%s' "$trows" | sed '/^$/d')
+    if out=$(pick_multi "$trows" "$tsel" --delimiter='\t' --with-nth=1 --prompt="tests > " \
+      --header="For: $labels
+TAB tick several test classes · ★ changed · 📸 screenshot · ENTER done · ESC keep all"); then
+      if grep -q "^◆ ALL tests" <<< "$out"; then tests=""
+      else tests=$(printf '%s\n' "$out" | awk -F'\t' 'NF{print $2 "|" $3 "|" $4}'); fi
+    fi
+  fi
+
+  while IFS=$'\t' read -r task label scope; do
+    local own=""
+    if [ "$mods" != ALL ] && is_test_task "$task"; then
+      # keep only tests that belong to this command's modules
+      own=$(printf '%s\n' "$tests" | awk -F'|' 'NR==FNR{ok[$0]=1; next} NF && ($1 in ok)' <(printf '%s\n' $mods) - | tr '\n' ' ' | sed 's/ $//')
+    fi
+    set_job "$task" "$label" "$scope" "$mods" "$own"
+  done <<< "$mtasks"
+}
+
+# The usual CI checks, on the modules changed on this branch
+auto_changed() {
+  [ -n "$changed" ] || { notice="⚠ No changed modules found on this branch"; return; }
+  local mods; mods=$(printf '%s\n' "$changed" | tr '\n' ' ' | sed 's/ $//')
+  while IFS=$'\t' read -r label task scope _ auto; do
+    [ "$auto" = auto ] || continue
+    [ "$scope" = module ] || { set_job "$task" "$label" "$scope" "" ""; continue; }
+    local old; old=$(job_field "$task" 4)
+    [ "$old" = ALL ] && continue
+    set_job "$task" "$label" "$scope" "$(printf '%s %s' "$old" "$mods" | tr ' ' '\n' | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')" "$(job_field "$task" 5)"
+  done <<< "$commands"
+  notice="★ Added the auto checks; module ones on $(printf '%s\n' "$changed" | summary 3)"
+}
+
+# Presets: one file per preset holding job lines. Most recently used first.
+preset_dir="$HOME/.config/gboard/presets/$(basename "$root")"
+mkdir -p "$preset_dir"
+
+ask_name() {
+  local out rc=0
+  out=$(printf '' | fzf "${fzf_style[@]}" --height=40% --layout=reverse --border --print-query --prompt="name > " \
+    --header="Name this preset · ENTER save · ESC cancel") || rc=$?
+  [ "$rc" -ne 130 ] || return 1
+  printf '%s' "$(printf '%s\n' "$out" | sed -n 1p | tr '/' '-' | sed 's/^ *//; s/ *$//')"
+}
+
+confirm_delete() {
+  local choice
+  choice=$(printf '✖ No, keep it\n🗑 Yes, delete it\n' | pick --prompt="delete? > " \
+    --header="Delete preset \"$(basename "$1")\"?") || return 1
+  [ "$choice" = "🗑 Yes, delete it" ] && rm -f "$1"
+}
+
+preset_lines() { awk -F'\t' 'NF{print "  " $2}' "$1"; }
+
+preset_menu() { # returns 0 if it ran
+  local file=$1 choice
+  choice=$(printf '▶ Run it\n🗑 Delete preset\n' | pick --prompt="$(basename "$file") > " \
+    --header="$(preset_lines "$file")
+
+$(full_command < "$file")") || return 1
+  case "$choice" in
+    "▶"*) touch "$file"; run "$(full_command < "$file")"; return 0 ;;
+    "🗑"*) confirm_delete "$file" && notice="🗑 Deleted \"$(basename "$file")\"" ;;
+  esac
+  return 1
+}
+
+# Non-interactive use, for scripts and AI agents: nothing opens and no terminal is needed.
+usage() {
+  local from="the built-in list"; [ -f "$config" ] && from=$config
+  cat <<EOF
+gboard: this repo's Gradle commands (from $from)
+
+  gboard                 open the picker (needs a terminal)
+  gboard list            the commands: step, task, where it runs, label
+  gboard modules         every Gradle module
+  gboard changed         modules changed on this branch
+  gboard presets         saved presets and the command each one runs
+  gboard print SPEC...   print the gradle command, in the right order, without running it
+  gboard run SPEC...     the same, and run it
+  gboard history         commands run here before, newest last
+  gboard agents          a note to paste into AGENTS.md / CLAUDE.md
+  gboard init            write .gboard here to edit the command list
+  gboard refresh         re-read the modules from Gradle
+
+SPEC is one of:
+  task                   a whole-project or fixed-module command, e.g. detekt
+  task=:a,:b             a per-module command on those modules (=ALL and =changed work too)
+  auto                   the auto checks, on the modules changed on this branch
+  @name                  a saved preset
+Anything not in the list is passed to Gradle as it is.
+
+e.g. gboard print clean detekt testDebugUnitTest=changed
+EOF
+}
+
+agents_note() {
+  cat <<'EOF'
+## Gradle commands
+
+This repo's Gradle commands are listed in `.gboard` (step | label | task | where). Use those task names; don't guess.
+
+- `gboard print detekt testDebugUnitTest=changed` prints the exact command, in the right order. `gboard run ...` runs it.
+- `gboard changed` lists modules changed on this branch; `gboard modules` lists all of them; `gboard help` has the rest.
+- Without gboard: `./gradlew` with whole-project tasks as they are, per-module tasks as `:module:task`. Steps 1-2 (clean, formatting) go in their own `./gradlew` run before the rest.
+EOF
+}
+
+# SPECs -> jobs
+jobs_from_specs() {
+  local spec task mods line m fixed
+  for spec in "$@"; do
+    case "$spec" in
+      auto) auto_changed; continue ;;
+      @*)
+        [ -f "$preset_dir/${spec#@}" ] || { echo "No preset \"${spec#@}\" (see: gboard presets)" >&2; return 1; }
+        while IFS=$'\t' read -r t l s m2 ts; do [ -n "$t" ] && set_job "$t" "$l" "$s" "$m2" "$ts"; done < "$preset_dir/${spec#@}"
+        continue ;;
+    esac
+    task=${spec%%=*}; mods=""; [ "$spec" = "$task" ] || mods=${spec#*=}
+    line=$(printf '%s\n' "$commands" | awk -F'\t' -v t="$task" '$2==t')
+    if [ -z "$line" ]; then set_job "$task" "$task" root "" ""; continue; fi
+    if [ "$(cut -f3 <<< "$line")" != module ]; then set_job "$task" "$(cut -f1 <<< "$line")" "$(cut -f3 <<< "$line")" "" ""; continue; fi
+    case "$mods" in
+      "") echo "$task runs per module: use $task=:module,:other (or =ALL, =changed)" >&2; return 1 ;;
+      ALL) ;;
+      changed)
+        mods=$(printf '%s\n' "$changed" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')
+        [ -n "$mods" ] || { echo "No modules changed on this branch" >&2; return 1; } ;;
+      *)
+        fixed=""
+        for m in $(printf '%s' "$mods" | tr ',' ' '); do
+          case "$m" in :*) ;; *) m=":$m" ;; esac
+          grep -qxF -- "$m" <<< "$all_modules" || { echo "No module $m (see: gboard modules)" >&2; return 1; }
+          fixed="$fixed $m"
+        done
+        mods=${fixed# } ;;
+    esac
+    set_job "$task" "$(cut -f1 <<< "$line")" module "$mods" ""
+  done
+}
+
+case "${1:-}" in
+  help|-h|--help) usage; exit 0 ;;
+  agents) agents_note; exit 0 ;;
+  list)
+    printf '%-5s %-26s %-8s %-5s %s\n' step task where auto label
+    printf '%s\n' "$commands" | awk -F'\t' '{ printf "%-5s %-26s %-8s %-5s %s\n", $4, $2, $3, ($5 ? $5 : "-"), $1 }'
+    exit 0 ;;
+  modules) printf '%s\n' "$all_modules"; exit 0 ;;
+  changed) printf '%s\n' "$changed" | sed '/^$/d'; exit 0 ;;
+  presets)
+    ls -t "$preset_dir" 2>/dev/null | while read -r n; do printf '@%s\n  %s\n' "$n" "$(full_command < "$preset_dir/$n")"; done
+    exit 0 ;;
+  print|run)
+    mode=$1; shift
+    [ $# -gt 0 ] || { usage >&2; exit 1; }
+    notice=""
+    jobs_from_specs "$@" || exit 1
+    case "$notice" in ⚠*) echo "$notice" >&2 ;; esac
+    cmd=$(printf '%s\n' "$jobs" | full_command || true)
+    [ -n "$cmd" ] || exit 1
+    if [ "$mode" = print ]; then printf '%s\n' "$cmd"; else run "$cmd"; fi
+    exit ;;
+  "") # no terminal: a script or an agent called it (GBOARD_INTERACTIVE=1 forces the menu, for tests)
+    [ -n "${GBOARD_INTERACTIVE:-}" ] || { [ -t 0 ] && [ -t 1 ]; } || { usage; exit 0; } ;;
+  __enter|__rows|__header) ;;
+  *) echo "gboard: unknown command \"$1\"" >&2; usage >&2; exit 1 ;;
+esac
+
+menu_rows() { # display <TAB> kind <TAB> value [<TAB> label <TAB> scope]
+  ls -t "$preset_dir" 2>/dev/null | while read -r n; do
+    printf '● %s  ·  %s\tpreset\t%s\n' "$n" "$(cut -f2 "$preset_dir/$n" | summary 2)" "$preset_dir/$n"
+  done
+  # Always listed, so rows below never shift when the first command is ticked
+  printf '▶ Run\trun\t\n'
+  printf '💾 Save as preset\tsave\t\n'
+  [ -n "$changed" ] && printf '★ Auto: checks on changed modules (%s)\tauto\t\n' "$(printf '%s\n' "$changed" | summary 2)"
+  while IFS=$'\t' read -r label task scope _; do
+    line=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$task" '$1==t')
+    if [ -n "$line" ]; then printf '✓ %s  %s\tcmd\t%s\t%s\t%s\n' "$label" "$(job_desc "$line")" "$task" "$label" "$scope"
+    else printf '  %s\tcmd\t%s\t%s\t%s\n' "$label" "$task" "$label" "$scope"; fi
+  done <<< "$commands"
+}
+
+# Same number of lines every time, so the menu doesn't jump when something is ticked:
+# message, the gradle line (empty at first), the optional second build, then the keys.
+menu_header() {
+  local cmd first second
+  cmd=$(printf '%s\n' "$jobs" | full_command || true)
+  first=${cmd%% && *}; [ -n "$first" ] || first=$gradle_prefix
+  second=""; case "$cmd" in *" && "*) second="then ${cmd#* && }" ;; esac
+  printf '%s\n%s\n%s\n\n%s' "${notice:- }" "$first" "${second:- }" \
+    "TAB tick several · ENTER open/tick · ✓ added (open again to add modules) · DEL delete preset · ESC quit"
+}
+
+row_index() { # kind value -> line number of that row in the menu, 1 if gone
+  # reads the whole menu: stopping early would cut menu_rows off mid-write (broken pipe)
+  menu_rows | awk -F'\t' -v k="$1" -v v="$2" '!found && $2==k && $3==v { n=NR; found=1 } END { print (found ? n : 1) }'
+}
+
+# Callbacks fzf runs while the menu stays open. ENTER on a command without modules ticks it in place,
+# so the list doesn't blink and the cursor stays on it; anything else closes the menu as usual.
+self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+case "${1:-}" in
+  __enter)
+    kind=$2 task=$3 scope=${4:-}
+    if [ "${FZF_SELECT_COUNT:-0}" -gt 0 ] || [ "$kind" != cmd ] || [ "$scope" = module ]; then echo accept; exit 0; fi
+    jobs=$(cat "$GB_STATE")
+    if has_job "$task"; then remove_job "$task"
+    else set_job "$task" "$(printf '%s\n' "$commands" | awk -F'\t' -v t="$task" '$2==t{print $1}')" "$scope" "" ""; fi
+    printf '%s\n' "$jobs" > "$GB_STATE"
+    echo "reload-sync($self __rows)+pos($(row_index cmd "$task"))+transform-header($self __header)"
+    exit 0 ;;
+  __rows) jobs=$(cat "$GB_STATE"); menu_rows; exit 0 ;;
+  __header) jobs=$(cat "$GB_STATE"); notice=""; menu_header; exit 0 ;;
+esac
+
+# fzf 0.46 is the first with everything the menu uses (FZF_SELECT_COUNT for ticking in place)
+command -v fzf >/dev/null || { echo "gboard needs fzf 0.46 or newer. Install it with install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+fzf_version=$(fzf --version | awk '{ print $1 }')
+awk -v v="$fzf_version" 'BEGIN { split(v, x, "."); exit !(x[1] > 0 || x[2] >= 46) }' \
+  || { echo "gboard needs fzf 0.46 or newer, this is $fzf_version. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+state=$(mktemp "${TMPDIR:-/tmp}/gboard.XXXXXX")
+trap 'rm -f "$state"' EXIT
+export GB_STATE=$state GB_CHANGED=$changed
+
+notice=""
+focus_kind="" focus_value=""
+while true; do
+  cmd=$(printf '%s\n' "$jobs" | full_command || true)
+  printf '%s\n' "$jobs" > "$state"
+  focus=1; [ -n "$focus_kind" ] && focus=$(row_index "$focus_kind" "$focus_value")
+  header=$(menu_header)
+  notice=""
+
+  out=$(menu_rows | pick --multi --delimiter='\t' --with-nth=1 --prompt="gboard > " \
+    --header="$header" --header-first --expect=del,ctrl-d \
+    --bind="start:pos($focus)" --bind="enter:transform:$self __enter {2} {3} {5}") || exit 0
+  jobs=$(cat "$state")   # ticks made inside the menu
+  cmd=$(printf '%s\n' "$jobs" | full_command || true)
+  key=$(printf '%s\n' "$out" | sed -n 1p)
+  picked=$(printf '%s\n' "$out" | sed 1d | sed '/^$/d')
+  [ -n "$picked" ] || continue
+  first=$(printf '%s\n' "$picked" | awk -F'\t' '$2!="cmd"' | sed -n 1p)
+  [ -n "$first" ] || first=$(printf '%s\n' "$picked" | sed -n 1p)
+  kind=$(printf '%s' "$first" | cut -sf2)
+  value=$(printf '%s' "$first" | cut -sf3)
+  focus_kind=$kind focus_value=$value
+
+  if [ -n "$key" ]; then
+    if [ "$kind" = preset ]; then confirm_delete "$value" && notice="🗑 Deleted \"$(basename "$value")\""
+    else notice="⚠ DEL / CTRL-D only deletes presets (● rows)"; fi
+    continue
+  fi
+
+  case "$kind" in
+    preset) preset_menu "$value" && exit 0 ;;
+    run)
+      if [ -z "$cmd" ]; then notice="⚠ Tick a command first"; continue; fi
+      confirm "$cmd" && { run "$cmd"; exit; } ;;
+    save)
+      if [ -z "$cmd" ]; then notice="⚠ Tick a command first"; continue; fi
+      if name=$(ask_name) && [ -n "$name" ]; then
+        verb="Saved"; [ -f "$preset_dir/$name" ] && verb="Updated"
+        printf '%s\n' "$jobs" > "$preset_dir/$name"
+        notice="💾 $verb preset \"$name\". It's at the top of the list now."
+        focus_kind=preset focus_value="$preset_dir/$name"
+      fi ;;
+    auto) auto_changed ;;
+    *) edit_commands "$(printf '%s\n' "$picked" | awk -F'\t' '$2=="cmd"{print $3 "\t" $4 "\t" $5}')" ;;
+  esac
+done

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Stands in for fzf in tests. Each call takes the next line of $FAKE_FZF_SCRIPT:
+#   pick REGEX         choose the first row matching REGEX
+#   pickall REGEX      choose every row matching REGEX (like ticking them with TAB)
+#   key KEY REGEX      press KEY (one of --expect) on the first row matching REGEX
+#   query TEXT         type TEXT and press ENTER (for --print-query prompts)
+#   esc                press ESC
+# With nothing left to do it presses ESC, so a test can never hang.
+# Every call's arguments and rows are logged to $FAKE_FZF_LOG.
+set -euo pipefail
+
+case "${1:-}" in
+  --help) echo "fake fzf, takes --gutter=CHAR"; exit 0 ;;
+  --version) echo "0.75.0 (fake)"; exit 0 ;;
+esac
+
+rows=$(cat)
+expect=0 print_query=0
+for arg in "$@"; do
+  case "$arg" in
+    --expect=*) expect=1 ;;
+    --print-query) print_query=1 ;;
+  esac
+done
+printf '%s\n%s\n' "$*" "$rows" >> "$FAKE_FZF_LOG"
+
+step=$(sed -n 1p "$FAKE_FZF_SCRIPT")
+tail -n +2 "$FAKE_FZF_SCRIPT" > "$FAKE_FZF_SCRIPT.next"; mv "$FAKE_FZF_SCRIPT.next" "$FAKE_FZF_SCRIPT"
+action=${step%% *} arg=${step#* }
+key=""
+case "$action" in
+  ""|esc) exit 130 ;;
+  query) printf '%s\n' "$arg"; exit 1 ;;   # real fzf: query printed, no match, exit 1
+  key) key=${arg%% *} arg=${arg#* } ;;
+esac
+
+[ "$print_query" = 0 ] || echo ""
+[ "$expect" = 0 ] || printf '%s\n' "$key"
+case "$action" in
+  pickall) grep -E -- "$arg" <<< "$rows" ;;
+  *) grep -E -m1 -- "$arg" <<< "$rows" ;;
+esac || { echo "fake-fzf: no row matches /$arg/" >&2; exit 1; }
