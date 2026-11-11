@@ -12,10 +12,7 @@ Task Board (`tb`) runs Gradle tasks.
 
 ## Why
 
-Like you, I've always had trouble testing exactly what I want to test.
-
-- Running every task takes too long.
-- Running one task by hand means typing long task names.
+I've always had trouble with long custom commands that always keep changing, specially in big projects.
 
 tb does two things:
 

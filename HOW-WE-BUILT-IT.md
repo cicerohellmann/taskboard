@@ -1,17 +1,10 @@
 # How we built it
 
-tb was built by one person and an AI assistant (Claude), in a chat.
-The person said what they wanted. The AI wrote the code. The person tried it and said what was wrong.
-
 ## The problem
 
-Like you, I've always had trouble testing exactly what I want to test.
+I've always had trouble with long custom commands that always keep changing, specially in big projects.
 
-- Running every task takes too long.
-- Running one task by hand means typing long task names.
-- Gradle task names are hard to remember.
-
-The first ask was a "DJ board": a board of commands to click through, not to type.
+The first ask was a "DJ board": all the commands in one place. Click a command, open a list, select the modules. The commands are hard to remember.
 
 ## What we thought about
 
@@ -19,33 +12,35 @@ Each line is a decision, and why.
 
 | Decision | Why |
 |---|---|
-| fzf in the terminal, not an IDE plugin. | The terminal is where the commands run. fzf is small and fast. |
-| One straight path: task, then modules, then test classes, then back. | A first version had a hub menu with an "Add to run list" step. Too many clicks. |
-| Changed modules have a ★ and are at the top. | You almost always want the modules you changed. |
-| The header has the same height all the time. | The menu jumped when something was ticked. That was annoying. |
-| `▶ Run` and `💾 Save as preset` are always in the list. | Same reason. The rows below them never move. |
-| One command for everything. | One `./gradlew` call is faster than many. `--continue` shows every failure, not only the first one. |
-| A step column: clean, formatting, checks, tests, builds, reports. | The order of tasks matters. clean must run first. Formatting changes files, so it runs before the checks. |
-| Steps 1 and 2 run as their own call. | With `--parallel`, Gradle can run the checks while clean or formatting still changes the files. A separate call finishes them first. |
-| Presets, history, `tb last`. | The same set of tasks runs many times a day. |
-| The task list lives in `.tb`, in the project. | Every project has different tasks. The team shares one file. |
-| Auto is the first-class feature. | The most common case: run the standard checks on the modules I changed, before I push. |
-| Auto also runs on the modules that depend on a changed module. | A change in `:core` can break `:app`. The affected-module plugins below do this; we added it after we found them. |
-| Dependencies come from the build files, not from Gradle. | Running Gradle to get the graph is slow. Reading the build files takes a fraction of a second. |
-| You can still go deep by hand. | Sometimes you want one task, on one module, on one test class. |
-| `tb print` and `tb run` never open the menu. | AI agents and scripts can't use a menu. They get the same tasks and the same order. |
-| `runner:` line. | tb is designed for Gradle. It can be used with anything else. |
-| Tests with a fake Gradle project and a fake fzf. | "I want tests." The tests run with no Gradle, no Android SDK and no terminal. Two bugs got past the first tests; each one now has a test. |
-| The Unlicense. | Copy it, do whatever you want with it. |
+| A menu in the terminal, with fzf. | The first ask was an app or a plugin. The AI built a terminal menu first, and it stayed. |
+| Select modules from a list. | "when we want to run commands that could be module specific, like we could click, open a list and select which modules we want to run them". |
+| Run more tasks at the same time, in one command. | "I want to run more commands simultaneously". |
+| ▶ Run, then Cancel / Confirm. | "in case you accidentally press it twice". |
+| Presets. | "a button … to save it as a preset". Run it or delete it, with a confirm before delete. |
+| Open a task again: what was added is marked, you can add more. | "I would like to see some sort of marker showing the commands that are already added". |
+| One straight path: task, then modules, then test classes, then back. | A later version had more screens. "There are too many clicks, too many options. I like the way it was in the beginning." |
+| Ticking a row doesn't move the cursor. | "the window blinks and my arrow goes up. I want my arrow to continue on top of the selection I made." |
+| Whole-project tasks are ticked on the main menu, with no module screen. | "These global comments, we can just select them here." |
+| A step column. | "How do we guarantee order here?" clean must run first. Formatting changes files, so it runs before the checks. |
+| Steps 1 and 2 run as their own call. | With `--parallel`, Gradle can run the checks while clean or formatting still changes the files. |
+| Auto. | "auto-select modified modules". Later: "a first-class citizen auto runner that will detect the modified modules and run the commands there." |
+| Auto also runs on the modules that depend on a changed module. | "check the modules that depend on that module for the auto". |
+| Dependencies come from the build files, not from Gradle. | The AI's choice. tb does not have to run Gradle to find them. |
+| You can still go deep by hand. | "go deep into your commands, deep into your modules, and define manually how every command should run." |
+| The task list lives in `.tb`, in the project. | "can this be used in any android project?" |
+| `tb print` and `tb run` never open the menu. | "something AI can consume without having to run the tool perse". |
+| `runner:` line. | "designed for usage with Gradle but this can be used with anything else". |
+| Tests with a fake Gradle project and a fake fzf. | You asked for tests. The tests run with no Gradle, no Android SDK and no terminal. |
+| The Unlicense. | You asked for a license. Copy it, do whatever you want with it. |
 
 ## What we changed on the way
 
-- **The name.** gboard, then "command center" with the command `cc`. `cc` is the C compiler, so no. Then `coce`. Then **Task Board**, command `tb`.
-- **The README.** The first version was too long and told a story. We rewrote it as a manual: short lines, the same words every time.
-- **The screenshots.** First, full screenshots with an arrow on the row. Then, a picture of only that row. Then, no pictures: the row text in `code`.
+- **The name.** gboard. Then "command center", command `cc`. `cc` is already the C compiler. Then **Task Board**, command `tb`.
+- **The README.** "you're kind of overdescribing these things". We rewrote it as a manual: short lines, the same words every time.
+- **The screenshots.** First, one screenshot per row. Then, no pictures: "Just remove the images." The row text is in `code`.
 - **Install.** First an install script. Then Homebrew: `brew install cicerohellmann/tap/tb`.
 - **Affected modules.** First Auto ran only on the changed modules. After we looked at tools like this one, Auto also runs on the modules that depend on them.
-- **Review.** Before publishing, separate AI agents read the README. One checked every claim against the code. One read it as a new user. One checked every file and every link.
+- **Review.** "I want some sub-agents to scrutinize the readme." AI agents checked the README against the code.
 
 ## Other people's code
 
