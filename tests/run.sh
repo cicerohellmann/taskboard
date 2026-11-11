@@ -177,6 +177,13 @@ check "=affected works in a SPEC" "$P :app:testDebugUnitTest :generated:testDebu
   "$(gb print testDebugUnitTest=affected)"
 check "=changed stays the changed modules only" "$P :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" \
   "$(gb print testDebugUnitTest=changed)"
+tui "pick Unit tests" "pick ◆ CHANGED AND DEPENDENT" "esc" "pick ▶ Run" "pick Confirm" > /dev/null
+check "modules screen: one row for the changed and dependent modules" \
+  ":app:testDebugUnitTest :generated:testDebugUnitTest :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" "$(gradle_runs | sed 's/^--continue --parallel --console=rich //')"
+contains "it shows how many" "$(cat "$FAKE_FZF_LOG")" "◆ CHANGED AND DEPENDENT MODULES (4)"
+contains "dependents have a ☆" "$(cat "$FAKE_FZF_LOG")" "☆ :app"
+contains "CTRL-A ticks every row shown" "$(cat "$FAKE_FZF_LOG")" "--bind=ctrl-a:select-all"
+rm -f "$HOME/.tb_history"
 (cd "$REPO" && git checkout -q lib/b/src/test/java/BTest.kt)
 
 echo "== run, history, last, hist"

@@ -193,10 +193,16 @@ else
   ' <(printf '%s\n' "$changed") <(module_deps) | sort)
 fi
 
+# Modules that depend on a changed module, without the changed ones
+dependents=$(printf '%s\n' "$affected" | grep -vxF -f <(printf '%s\n' "$changed") | sed '/^$/d' || true)
+affected_row="◆ CHANGED AND DEPENDENT MODULES ($(printf '%s\n' "$affected" | sed '/^$/d' | wc -l | tr -d ' '))"
+
 module_rows=$( {
   echo "◆ ALL MODULES"
+  [ -n "$affected" ] && echo "$affected_row"
   [ -n "$changed" ] && printf '%s\n' "$changed" | sed 's/^/★ /'
-  printf '%s\n' "$all_modules" | grep -vxF -f <(printf '%s\n' "$changed") || true
+  [ -n "$dependents" ] && printf '%s\n' "$dependents" | sed 's/^/☆ /'
+  printf '%s\n' "$all_modules" | grep -vxF -f <(printf '%s\n' "$affected") || true
 } | sed '/^$/d')
 
 # fzf can't preselect rows, so tick them on start by position
@@ -337,18 +343,20 @@ edit_commands() {
   if grep -qx ALL <<< "$existing"; then sel="◆ ALL MODULES"
   else sel=$(printf '%s\n' "$existing" | while read -r m; do
       [ -n "$m" ] || continue
-      if grep -qxF -- "$m" <<< "$changed"; then echo "★ $m"; else echo "$m"; fi
+      if grep -qxF -- "$m" <<< "$changed"; then echo "★ $m"
+      elif grep -qxF -- "$m" <<< "$dependents"; then echo "☆ $m"; else echo "$m"; fi
     done); fi
 
-  out=$(pick_multi "$rows" "$sel" --prompt="modules > " \
+  out=$(pick_multi "$rows" "$sel" --prompt="modules > " --bind=ctrl-a:select-all \
     --header="For: $labels
-★ changed on this branch · TAB tick several · type to filter · ENTER next · ESC back") || return 0
+★ changed · ☆ depends on a changed one · TAB tick · type to filter · CTRL-A tick all shown · ENTER next · ESC back") || return 0
   if grep -q '^✖ Remove' <<< "$out"; then
     while read -r t; do remove_job "$t"; done <<< "$(printf '%s\n' "$mtasks" | cut -f1)"
     return 0
   fi
   if grep -q "ALL MODULES" <<< "$out"; then mods=ALL
-  else mods=$(printf '%s\n' "$out" | sed 's/^★ //' | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//'); fi
+  else mods=$( { grep -qF "$affected_row" <<< "$out" && printf '%s\n' "$affected"
+      grep -vF "$affected_row" <<< "$out" | sed 's/^[★☆] //' || true; } | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'); fi
 
   # Test classes, for test commands (skipped for ALL MODULES: too many to list)
   tests=$(printf '%s\n' "$mtasks" | cut -f1 | while read -r t; do job_field "$t" 5 | tr ' ' '\n'; done | sed '/^$/d' | awk '!seen[$0]++')
@@ -358,9 +366,9 @@ edit_commands() {
     tsel=$(printf '%s\n' "$trows" | awk -F'\t' 'NR==FNR{ if (NF) want[$0]=1; next } (($2 "|" $3 "|" $4) in want)' \
       <(printf '%s\n' "$tests") - )
     trows=$(printf '◆ ALL tests in these modules\t\t\t\n%s' "$trows" | sed '/^$/d')
-    if out=$(pick_multi "$trows" "$tsel" --delimiter='\t' --with-nth=1 --prompt="tests > " \
+    if out=$(pick_multi "$trows" "$tsel" --delimiter='\t' --with-nth=1 --prompt="tests > " --bind=ctrl-a:select-all \
       --header="For: $labels
-TAB tick several test classes · ★ changed · 📸 screenshot · ENTER done · ESC keep all"); then
+TAB tick · CTRL-A tick all shown · ★ changed · 📸 screenshot · ENTER done · ESC keep all"); then
       if grep -q "^◆ ALL tests" <<< "$out"; then tests=""
       else tests=$(printf '%s\n' "$out" | awk -F'\t' 'NF{print $2 "|" $3 "|" $4}'); fi
     fi

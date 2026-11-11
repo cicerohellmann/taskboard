@@ -31,7 +31,7 @@ tb does two things:
 | `auto` task | A task marked `auto` in the task list. Your standard checks: lint, detekt, unit tests. |
 | changed module | A module with a changed file on your branch. See [Auto](#auto). |
 | affected module | A changed module, or a module that depends on a changed module. See [Auto](#auto). |
-| tick | Select a row. ENTER ticks one row. TAB ticks several rows. |
+| tick | Select a row. ENTER ticks one row. TAB ticks several rows. CTRL-A ticks every row shown. |
 | preset | A saved set of ticked tasks, with their modules and test classes. |
 | step | The run order of a task, 1 to 6. See [Step order](#step-order). |
 
@@ -217,10 +217,21 @@ The lines above the rows:
 |---|---|
 | `✖ Remove Unit tests from the list` | Unticks the task. Shows only when the task is ticked. |
 | `◆ ALL MODULES` | Runs the task on every module. No test classes screen. |
+| `◆ CHANGED AND DEPENDENT MODULES (3)` | Adds the affected modules. The number is how many. Shows only when there are affected modules. |
 | `★ :garden` | A changed module. Changed modules are at the top. |
+| `☆ :app` | A module that depends on a changed module. These come after the changed modules. |
 | `:settings` | A module. |
 
+The lines above the rows:
+
+| Line | What it shows |
+|---|---|
+| `For: Unit tests` | The task. |
+| `★ changed · ☆ depends on a changed one · TAB tick · type to filter · CTRL-A tick all shown · ENTER next · ESC back` | The marks and the keys. |
+
 - The modules the task already has are ticked when the screen opens.
+- `◆ CHANGED AND DEPENDENT MODULES` adds the same modules as `tb affected`.
+- CTRL-A ticks every row shown. Type to filter first to tick only some rows.
 - ENTER keeps the ticked modules.
 
 ### Test classes screen
@@ -231,9 +242,17 @@ The lines above the rows:
 | `★    MarkdownParserTest  (:notes:editor)` | A test class in a changed file. Changed test classes are at the top. |
 | `  📸 EditorScreenshotTest  (:notes:editor)` | A screenshot test class. The file has the word `paparazzi`. |
 
+The lines above the rows:
+
+| Line | What it shows |
+|---|---|
+| `For: Unit tests` | The task. |
+| `TAB tick · CTRL-A tick all shown · ★ changed · 📸 screenshot · ENTER done · ESC keep all` | The keys and the marks. |
+
 - Test classes are the `*Test.kt` and `*Tests.kt` files in `src/test`.
 - A module with none of the ticked test classes is dropped from the task.
 - Paparazzi tasks get only screenshot test classes.
+- CTRL-A ticks every row shown. Type to filter first to tick only some rows.
 - ESC keeps the test classes you had before.
 
 ### Run screen
@@ -266,6 +285,7 @@ The lines above the rows:
 |---|---|
 | ENTER | Ticks the row. On a module task in the main menu, opens its modules screen. |
 | TAB | Ticks several rows. |
+| CTRL-A | Ticks every row shown. On the modules screen and the test classes screen. |
 | DEL / CTRL-D | Deletes a preset. |
 | ESC | Goes back. On the main menu, quits. |
 
