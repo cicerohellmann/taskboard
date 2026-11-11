@@ -1,24 +1,11 @@
 # gboard
 
+![gboard: ticking unit tests on the changed modules, clean and the auto checks, then running them](demo/demo.gif)
+
 A command board for Gradle projects, for developers (and AI agents) with too many commands under their belt.
 
 Tick the commands you want, pick the modules, press Run. gboard builds one `./gradlew` line in the right order,
 so you stop retyping long task paths or looking up which task does what.
-
-```
-gboard >
-  ▶ Run
-  💾 Save as preset
-  ★ Auto: checks on changed modules (:notes:editor, :garden)
-✓ Unit tests  → :notes:editor, :garden
-  Android lint
-✓ Clean  → whole project
-  Build debug APK
-  ...
-
-./gradlew --continue --parallel --console=rich clean
-then ./gradlew --continue --parallel --console=rich :notes:editor:testDebugUnitTest :garden:testDebugUnitTest
-```
 
 ## What it does
 
@@ -76,10 +63,21 @@ Edit `.gboard`. One command per line:
 | where | `module`: you pick modules. `root`: whole project, just a tick. `:something`: always that module. |
 | auto | `auto` means ★ Auto adds it. |
 
+For a fuller list (formatting, Detekt, Paparazzi, Kover and more), see [`example/.gboard`](example/.gboard).
+
 Commit `.gboard` so your team (and their agents) share the list, or add it to `.git/info/exclude` to keep it
 to yourself. A list in `~/.config/gboard/commands` applies to every project without its own `.gboard`.
 
 Modules come from `./gradlew projects`, cached until your settings files change. `gboard refresh` re-reads them.
+
+## Try it without an Android project
+
+```sh
+demo/make-project.sh /tmp/gboard-demo && cd /tmp/gboard-demo && gboard
+```
+
+This builds the made-up project from the GIF, with a stand-in `./gradlew` that only prints task names.
+Copy `example/.gboard` into it to see the fuller list. `vhs demo/demo.tape` re-records the GIF.
 
 ## Keys
 
