@@ -1,4 +1,4 @@
-# Records demo.gif: vhs demo/demo.tape (run ./make-project.sh /tmp/gboard-demo first)
+# Records demo.gif: vhs demo/demo.tape (run ./make-project.sh /tmp/tb-demo first)
 Output demo/demo.gif
 Set Shell "bash"
 Set FontSize 17
@@ -9,11 +9,11 @@ Set Theme "Catppuccin Mocha"
 Set TypingSpeed 70ms
 
 Hide
-Type "export HOME=/tmp/gboard-demo-home FZF_DEFAULT_OPTS= PS1='\[\e[1;34m\]notes\[\e[0m\] (better-editor) $ ' && mkdir -p $HOME && cd /tmp/gboard-demo && gboard refresh >/dev/null 2>&1; clear" Enter
+Type "export HOME=/tmp/tb-demo-home FZF_DEFAULT_OPTS= PS1='\[\e[1;34m\]notes\[\e[0m\] (better-editor) $ ' && mkdir -p $HOME && cd /tmp/tb-demo && tb refresh >/dev/null 2>&1; clear" Enter
 Sleep 500ms
 Show
 
-Type "gboard" Sleep 400ms Enter
+Type "tb" Sleep 400ms Enter
 Sleep 1.8s
 
 # A command with modules: pick it, tick modules, keep all tests

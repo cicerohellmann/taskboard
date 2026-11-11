@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Installs gboard into ~/.local/bin (or $GBOARD_BIN), and fzf too if it's missing or older than 0.46.
-#   curl -fsSL https://raw.githubusercontent.com/cicerohellmann/gboard/main/install.sh | bash
+# Installs tb into ~/.local/bin (or $TB_BIN), and fzf too if it's missing or older than 0.46.
+#   curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/install.sh | bash
 # or, from a clone: ./install.sh
 set -euo pipefail
 
-bin=${GBOARD_BIN:-$HOME/.local/bin}
+bin=${TB_BIN:-$HOME/.local/bin}
 mkdir -p "$bin"
-for tool in git curl; do command -v "$tool" > /dev/null || { echo "gboard needs $tool. Install it first."; exit 1; }; done
+for tool in git curl; do command -v "$tool" > /dev/null || { echo "tb needs $tool. Install it first."; exit 1; }; done
 
 fzf_ok() {
   command -v fzf > /dev/null || return 1
@@ -27,13 +27,13 @@ else
 fi
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]:-.}")" 2> /dev/null && pwd || true)
-if [ -n "$here" ] && [ -f "$here/gboard" ] && [ -f "$here/install.sh" ]; then
-  cp "$here/gboard" "$bin/gboard"
+if [ -n "$here" ] && [ -f "$here/tb" ] && [ -f "$here/install.sh" ]; then
+  cp "$here/tb" "$bin/tb"
 else
-  curl -fsSL https://raw.githubusercontent.com/cicerohellmann/gboard/main/gboard -o "$bin/gboard"
+  curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/tb -o "$bin/tb"
 fi
-chmod +x "$bin/gboard"
-echo "✔ gboard installed in $bin"
+chmod +x "$bin/tb"
+echo "✔ tb installed in $bin"
 
 case ":$PATH:" in
   *":$bin:"*) ;;
@@ -41,4 +41,4 @@ case ":$PATH:" in
 esac
 PATH="$bin:$PATH"
 fzf_ok || echo "⚠ An older fzf comes first on your PATH ($(command -v fzf)). Put $bin before it."
-echo "Run gboard inside any project with ./gradlew. gboard help lists the commands for scripts and AI agents."
+echo "Run tb inside any project with ./gradlew. tb help lists the commands for scripts and AI agents."

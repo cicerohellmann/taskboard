@@ -1,11 +1,14 @@
-# Example .gboard for a typical Android project. Copy it to your project root and keep the lines your build has.
-# AI agents: use these task names instead of guessing. `gboard print testDebugUnitTest=changed` gives the
-# exact command, `gboard list` shows this table.
+# Example .tb for a typical Android project. Copy it to your project root and keep the lines your build has.
+# AI agents: use these task names instead of guessing. `tb print testDebugUnitTest=changed` gives the
+# exact command, `tb list` shows this table.
 #
 # step  | label                                | gradle task                | where   | auto
 #   step   run order: 1 clean, 2 changes files, 3 checks, 4 tests, 5 build, 6 reports (1-2 run as their own build first)
 #   where  module = you pick modules, root = whole project (just a tick), :name = always that module
 #   auto   "auto" = ★ Auto adds it, on the modules changed on your branch
+#
+# runner: the command the tasks are added to. This is the default; change it for other build tools (make -k, just...)
+# runner: ./gradlew --continue --parallel --console=rich
 
 # Clean
 1 | Clean                                | clean                      | root

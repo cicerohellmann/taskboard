@@ -21,11 +21,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install on a clean machine
         run: ./install.sh
-      - name: Check fzf is new enough and gboard runs
+      - name: Check fzf is new enough and tb runs
         run: |
           export PATH="$HOME/.local/bin:$PATH"
           fzf --version
           mkdir demo && cd demo && git init -q
           printf '#!/bin/sh\necho "+--- Project '"'"':app'"'"'"\n' > gradlew && chmod +x gradlew
-          gboard help
-          gboard print clean assembleDebug
+          tb help
+          tb print clean assembleDebug

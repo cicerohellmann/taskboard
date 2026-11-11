@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# gboard: pick Gradle commands, then modules and tests for each, then run them all in one build.
-# Run it from anywhere inside a Gradle repo that has ./gradlew. https://github.com/cicerohellmann/gboard
-#   gboard          open the menu
-#   gboard last     rerun the previous command
-#   gboard hist     pick from previously run commands
-#   gboard init     write a .gboard file in this repo to edit its command list
-#   gboard refresh  re-read the module list from Gradle
-#   gboard help     the commands that don't open anything (print, run, list...), for scripts and AI agents
+# tb (Task Board): pick Gradle tasks, then modules and tests for each, then run them all in one build.
+# Run it from anywhere inside a Gradle repo that has ./gradlew, or any repo whose .tb has a runner: line
+# (make, just...). https://github.com/cicerohellmann/taskboard
+#   tb          open the menu
+#   tb last     rerun the previous command
+#   tb hist     pick from previously run commands
+#   tb init     write a .tb file in this repo to edit its command list
+#   tb refresh  re-read the module list from Gradle
+#   tb help     the commands that don't open anything (print, run, list...), for scripts and AI agents
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 cd "$root"
-[ -x ./gradlew ] || { echo "No ./gradlew in $root"; exit 1; }
+gradle=""; [ -x ./gradlew ] && gradle=1   # modules, changed modules and test classes need Gradle
 
-history_file="$HOME/.gboard_history"
+history_file="$HOME/.tb_history"
 touch "$history_file"
 
 run() {
@@ -42,8 +43,8 @@ case "${1:-}" in
   history) awk -F'\t' -v r="$root" '$1==r{print $2}' "$history_file" | awk '!seen[$0]++' | tail -20; exit ;;
 esac
 
-# The command list. Each repo can have its own in a .gboard file (gboard init writes one to start from),
-# otherwise ~/.config/gboard/commands, otherwise this default.
+# The command list. Each repo can have its own in a .tb file (tb init writes one to start from),
+# otherwise ~/.config/tb/commands, otherwise this default.
 default_commands='# step | label | gradle task | where | auto
 #
 # step   order things run in, whatever order they are ticked in:
@@ -52,8 +53,12 @@ default_commands='# step | label | gradle task | where | auto
 # where  module = you pick the modules · root = whole project, just a tick · :app = always that module
 # auto   "auto" = added by ★ Auto, on the modules changed on this branch
 #
-# AI agents: use these task names instead of guessing. `gboard print detekt testDebugUnitTest=changed` gives the
-# exact command (`gboard help` for more). By hand: ./gradlew root tasks as they are, module tasks as
+# runner (optional) is what the tasks are added to. For other build tools, e.g. make or just:
+# runner: ./gradlew --continue --parallel --console=rich
+# Without ./gradlew there are no modules, so module and :app tasks run as plain whole-project tasks.
+#
+# AI agents: use these task names instead of guessing. `tb print detekt testDebugUnitTest=changed` gives the
+# exact command (`tb help` for more). By hand: ./gradlew root tasks as they are, module tasks as
 # :module:task, fixed ones as :app:task; steps 1-2 in their own ./gradlew run before the rest.
 3 | Android lint                        | lintDebug                 | module | auto
 4 | Unit tests                          | testDebugUnitTest         | module | auto
@@ -76,25 +81,32 @@ default_commands='# step | label | gradle task | where | auto
 # 6 | Coverage report                   | koverHtmlReport           | root'
 
 if [ "${1:-}" = init ]; then
-  [ -e .gboard ] && { echo "$root/.gboard already exists"; exit 1; }
-  printf '%s\n' "$default_commands" > .gboard
-  echo "Wrote $root/.gboard. Edit it to match this project's Gradle tasks."
+  [ -e .tb ] && { echo "$root/.tb already exists"; exit 1; }
+  printf '%s\n' "$default_commands" > .tb
+  echo "Wrote $root/.tb. Edit it to match this project's tasks."
   exit 0
 fi
 
-config="$root/.gboard"; [ -f "$config" ] || config="$HOME/.config/gboard/commands"
+config="$root/.tb"; [ -f "$config" ] || config="$HOME/.config/tb/commands"
 if [ -f "$config" ]; then command_source=$(cat "$config"); else command_source=$default_commands; fi
-# label <TAB> task <TAB> where <TAB> step <TAB> auto
-commands=$(printf '%s\n' "$command_source" | awk -F'|' '
+# A "runner: make -k" line replaces the ./gradlew prefix; the last one wins
+runner=$(printf '%s\n' "$command_source" | sed -nE 's/^[[:space:]]*runner:[[:space:]]*//p' | sed -n '$p' | sed 's/[[:space:]]*$//')
+gradle_prefix=${runner:-./gradlew --continue --parallel --console=rich}
+if [ -z "$gradle$runner" ]; then
+  case "${1:-}" in help|-h|--help) ;; *) echo "No ./gradlew in $root (for other build tools, add a runner: line to .tb)"; exit 1 ;; esac
+fi
+# label <TAB> task <TAB> where <TAB> step <TAB> auto. Without Gradle every command runs on the whole project.
+commands=$(printf '%s\n' "$command_source" | awk -F'|' -v gradle="$gradle" '
   /^[[:space:]]*(#|$)/ { next }
   { for (i=1; i<=NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i)
     if (NF < 4) next
+    if (gradle == "") $4 = "root"
     printf "%s\t%s\t%s\t%s\t%s\n", $2, $3, $4, $1, $5 }')
 [ -n "$commands" ] || { echo "No commands in $config"; exit 1; }
 
 # Modules come from Gradle itself (includes modules registered by code), cached until the settings change
 load_modules() {
-  local cache_dir="$HOME/.cache/gboard" key cache
+  local cache_dir="$HOME/.cache/tb" key cache
   mkdir -p "$cache_dir"
   cache="$cache_dir/$(printf '%s' "$root" | cksum | cut -d' ' -f1).modules"
   key=$(cat settings.gradle* 2>/dev/null | cksum | cut -d' ' -f1)
@@ -109,15 +121,21 @@ load_modules() {
   fi
   printf '%s\n' "$mods"
 }
-if [ -n "${GB_STATE:-}" ]; then all_modules=""   # callbacks from inside fzf don't need it
+case "${1:-}" in help|-h|--help|agents) no_modules=1 ;; *) no_modules="${GB_STATE:-}" ;; esac
+if [ -n "$no_modules" ] || [ -z "$gradle" ]; then all_modules=""   # help and callbacks from inside fzf don't need it
 else all_modules=$(load_modules "${1:-}"); fi
-[ "${1:-}" = refresh ] && { echo "$(printf '%s\n' "$all_modules" | wc -l | tr -d ' ') modules"; exit 0; }
+if [ "${1:-}" = refresh ]; then
+  [ -n "$gradle" ] || { echo "No ./gradlew here, so no modules to read"; exit 0; }
+  echo "$(printf '%s\n' "$all_modules" | wc -l | tr -d ' ') modules"; exit 0
+fi
 
 # Modules touched on this branch (vs main): each changed file belongs to the deepest module containing it
 if [ -n "${GB_STATE:-}" ]; then
   # Called back from inside fzf: reuse what the main process already worked out
   changed=$GB_CHANGED
   changed_files=""
+elif [ -z "$gradle" ]; then
+  changed="" changed_files=""
 else
   base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo HEAD)
   changed_files=$( { git diff --name-only "$base"; git ls-files --others --exclude-standard; } 2>/dev/null)
@@ -176,7 +194,6 @@ summary() { # lines -> "a, b, c" (first few)
 # The list: one line per added command.
 #   task <TAB> label <TAB> scope <TAB> modules ("ALL" or space separated) <TAB> tests ("module|Class|pap" space separated, empty = all)
 jobs=""
-gradle_prefix="./gradlew --continue --parallel --console=rich"
 
 job_field() { printf '%s\n' "$jobs" | awk -F'\t' -v t="$1" -v n="$2" '$1==t{print $n}'; }
 has_job() { awk -F'\t' -v t="$1" '$1==t { f=1 } END { exit !f }' <<< "$jobs"; }
@@ -312,9 +329,9 @@ TAB tick several test classes · ★ changed · 📸 screenshot · ENTER done ·
   done <<< "$mtasks"
 }
 
-# The usual CI checks, on the modules changed on this branch
+# The usual CI checks, on the modules changed on this branch (without Gradle: just the auto commands)
 auto_changed() {
-  [ -n "$changed" ] || { notice="⚠ No changed modules found on this branch"; return; }
+  [ -n "$changed" ] || [ -z "$gradle" ] || { notice="⚠ No changed modules found on this branch"; return; }
   local mods; mods=$(printf '%s\n' "$changed" | tr '\n' ' ' | sed 's/ $//')
   while IFS=$'\t' read -r label task scope _ auto; do
     [ "$auto" = auto ] || continue
@@ -323,11 +340,12 @@ auto_changed() {
     [ "$old" = ALL ] && continue
     set_job "$task" "$label" "$scope" "$(printf '%s %s' "$old" "$mods" | tr ' ' '\n' | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')" "$(job_field "$task" 5)"
   done <<< "$commands"
-  notice="★ Added the auto checks; module ones on $(printf '%s\n' "$changed" | summary 3)"
+  notice="★ Added the auto checks"
+  [ -z "$gradle" ] || notice="$notice; module ones on $(printf '%s\n' "$changed" | summary 3)"
 }
 
 # Presets: one file per preset holding job lines. Most recently used first.
-preset_dir="$HOME/.config/gboard/presets/$(basename "$root")"
+preset_dir="$HOME/.config/tb/presets/$(basename "$root")"
 mkdir -p "$preset_dir"
 
 ask_name() {
@@ -360,44 +378,61 @@ $(full_command < "$file")") || return 1
   return 1
 }
 
-# Non-interactive use, for scripts and AI agents: nothing opens and no terminal is needed.
+# tb help: what tb is, then the commands that work without a terminal (for scripts and AI agents)
 usage() {
   local from="the built-in list"; [ -f "$config" ] && from=$config
   cat <<EOF
-gboard: this repo's Gradle commands (from $from)
+Task Board (tb): a task board for Gradle. Tick tasks, pick modules, and tb builds
+one command line that runs them in the right order (clean, formatting, checks, tests, builds).
 
-  gboard                 open the picker (needs a terminal)
-  gboard list            the commands: step, task, where it runs, label
-  gboard modules         every Gradle module
-  gboard changed         modules changed on this branch
-  gboard presets         saved presets and the command each one runs
-  gboard print SPEC...   print the gradle command, in the right order, without running it
-  gboard run SPEC...     the same, and run it
-  gboard history         commands run here before, newest last
-  gboard agents          a note to paste into AGENTS.md / CLAUDE.md
-  gboard init            write .gboard here to edit the command list
-  gboard refresh         re-read the modules from Gradle
+  ★ Auto     the main path: finds the modules changed on your branch and runs the standard
+             tools marked "auto" in .tb (lint, detekt, ktlint, unit tests...) on them
+  by hand    or go deep: choose each command, its modules and its test classes yourself
+
+Menu keys: ENTER open/tick · TAB tick several · ESC back/quit · DEL delete preset
+
+Commands from $from
+Runner: $gradle_prefix
+  tb                 open the menu (needs a terminal)
+  tb print SPEC...   print the command, in the right order, without running it
+  tb run SPEC...     the same, and run it
+  tb list            the commands: step, task, where it runs, auto, label
+  tb modules         every Gradle module
+  tb changed         modules changed on this branch
+  tb presets         saved presets and the command each one runs
+  tb history         commands run here before, newest last
+  tb last            rerun the last command
+  tb hist            pick a command run before and rerun it
+  tb init            write .tb here to edit the command list
+  tb refresh         re-read the modules from Gradle
+  tb agents          a note to paste into AGENTS.md / CLAUDE.md
+  tb help            this text
 
 SPEC is one of:
+  auto                   the auto checks, on the modules changed on this branch
   task                   a whole-project or fixed-module command, e.g. detekt
   task=:a,:b             a per-module command on those modules (=ALL and =changed work too)
-  auto                   the auto checks, on the modules changed on this branch
   @name                  a saved preset
-Anything not in the list is passed to Gradle as it is.
+Anything not in the list is passed on as it is.
 
-e.g. gboard print clean detekt testDebugUnitTest=changed
+e.g. tb run auto
+     tb print clean detekt testDebugUnitTest=changed
+
+Other build tools: a "runner: make -k" line in .tb replaces ./gradlew. Without ./gradlew
+there are no modules, and every command runs on the whole project.
 EOF
 }
 
 agents_note() {
   cat <<'EOF'
-## Gradle commands
+## Build commands (tb)
 
-This repo's Gradle commands are listed in `.gboard` (step | label | task | where). Use those task names; don't guess.
+This repo's build tasks are listed in `.tb` (`tb list` shows them). Use those task names; don't guess Gradle task names.
 
-- `gboard print detekt testDebugUnitTest=changed` prints the exact command, in the right order. `gboard run ...` runs it.
-- `gboard changed` lists modules changed on this branch; `gboard modules` lists all of them; `gboard help` has the rest.
-- Without gboard: `./gradlew` with whole-project tasks as they are, per-module tasks as `:module:task`. Steps 1-2 (clean, formatting) go in their own `./gradlew` run before the rest.
+- First choice: `tb run auto` runs the standard checks (lint, static analysis, unit tests...) on the modules changed on this branch. `tb print auto` shows the command without running it.
+- Specific tasks: `tb print detekt testDebugUnitTest=changed` prints the exact command, in the right order. `tb run ...` runs it.
+- `tb changed` lists modules changed on this branch; `tb modules` lists all of them; `tb help` has the rest.
+- Without tb: the runner from `tb list` (default `./gradlew`) with whole-project tasks as they are, per-module tasks as `:module:task`. Steps 1-2 (clean, formatting) go in their own run before the rest.
 EOF
 }
 
@@ -408,7 +443,7 @@ jobs_from_specs() {
     case "$spec" in
       auto) auto_changed; continue ;;
       @*)
-        [ -f "$preset_dir/${spec#@}" ] || { echo "No preset \"${spec#@}\" (see: gboard presets)" >&2; return 1; }
+        [ -f "$preset_dir/${spec#@}" ] || { echo "No preset \"${spec#@}\" (see: tb presets)" >&2; return 1; }
         while IFS=$'\t' read -r t l s m2 ts; do [ -n "$t" ] && set_job "$t" "$l" "$s" "$m2" "$ts"; done < "$preset_dir/${spec#@}"
         continue ;;
     esac
@@ -426,7 +461,7 @@ jobs_from_specs() {
         fixed=""
         for m in $(printf '%s' "$mods" | tr ',' ' '); do
           case "$m" in :*) ;; *) m=":$m" ;; esac
-          grep -qxF -- "$m" <<< "$all_modules" || { echo "No module $m (see: gboard modules)" >&2; return 1; }
+          grep -qxF -- "$m" <<< "$all_modules" || { echo "No module $m (see: tb modules)" >&2; return 1; }
           fixed="$fixed $m"
         done
         mods=${fixed# } ;;
@@ -439,10 +474,11 @@ case "${1:-}" in
   help|-h|--help) usage; exit 0 ;;
   agents) agents_note; exit 0 ;;
   list)
+    printf 'runner: %s\n' "$gradle_prefix"
     printf '%-5s %-26s %-8s %-5s %s\n' step task where auto label
     printf '%s\n' "$commands" | awk -F'\t' '{ printf "%-5s %-26s %-8s %-5s %s\n", $4, $2, $3, ($5 ? $5 : "-"), $1 }'
     exit 0 ;;
-  modules) printf '%s\n' "$all_modules"; exit 0 ;;
+  modules) printf '%s\n' "$all_modules" | sed '/^$/d'; exit 0 ;;
   changed) printf '%s\n' "$changed" | sed '/^$/d'; exit 0 ;;
   presets)
     ls -t "$preset_dir" 2>/dev/null | while read -r n; do printf '@%s\n  %s\n' "$n" "$(full_command < "$preset_dir/$n")"; done
@@ -457,10 +493,10 @@ case "${1:-}" in
     [ -n "$cmd" ] || exit 1
     if [ "$mode" = print ]; then printf '%s\n' "$cmd"; else run "$cmd"; fi
     exit ;;
-  "") # no terminal: a script or an agent called it (GBOARD_INTERACTIVE=1 forces the menu, for tests)
-    [ -n "${GBOARD_INTERACTIVE:-}" ] || { [ -t 0 ] && [ -t 1 ]; } || { usage; exit 0; } ;;
+  "") # no terminal: a script or an agent called it (TB_INTERACTIVE=1 forces the menu, for tests)
+    [ -n "${TB_INTERACTIVE:-}" ] || { [ -t 0 ] && [ -t 1 ]; } || { usage; exit 0; } ;;
   __enter|__rows|__header) ;;
-  *) echo "gboard: unknown command \"$1\"" >&2; usage >&2; exit 1 ;;
+  *) echo "tb: unknown command \"$1\"" >&2; usage >&2; exit 1 ;;
 esac
 
 menu_rows() { # display <TAB> kind <TAB> value [<TAB> label <TAB> scope]
@@ -470,7 +506,8 @@ menu_rows() { # display <TAB> kind <TAB> value [<TAB> label <TAB> scope]
   # Always listed, so rows below never shift when the first command is ticked
   printf '▶ Run\trun\t\n'
   printf '💾 Save as preset\tsave\t\n'
-  [ -n "$changed" ] && printf '★ Auto: checks on changed modules (%s)\tauto\t\n' "$(printf '%s\n' "$changed" | summary 2)"
+  if [ -n "$changed" ]; then printf '★ Auto: checks on changed modules (%s)\tauto\t\n' "$(printf '%s\n' "$changed" | summary 2)"
+  elif [ -z "$gradle" ]; then printf '★ Auto: the auto checks\tauto\t\n'; fi
   while IFS=$'\t' read -r label task scope _; do
     line=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$task" '$1==t')
     if [ -n "$line" ]; then printf '✓ %s  %s\tcmd\t%s\t%s\t%s\n' "$label" "$(job_desc "$line")" "$task" "$label" "$scope"
@@ -512,11 +549,11 @@ case "${1:-}" in
 esac
 
 # fzf 0.46 is the first with everything the menu uses (FZF_SELECT_COUNT for ticking in place)
-command -v fzf >/dev/null || { echo "gboard needs fzf 0.46 or newer. Install it with install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+command -v fzf >/dev/null || { echo "tb needs fzf 0.46 or newer. Install it with install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
 fzf_version=$(fzf --version | awk '{ print $1 }')
 awk -v v="$fzf_version" 'BEGIN { split(v, x, "."); exit !(x[1] > 0 || x[2] >= 46) }' \
-  || { echo "gboard needs fzf 0.46 or newer, this is $fzf_version. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
-state=$(mktemp "${TMPDIR:-/tmp}/gboard.XXXXXX")
+  || { echo "tb needs fzf 0.46 or newer, this is $fzf_version. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+state=$(mktemp "${TMPDIR:-/tmp}/tb.XXXXXX")
 trap 'rm -f "$state"' EXIT
 export GB_STATE=$state GB_CHANGED=$changed
 
@@ -529,7 +566,7 @@ while true; do
   header=$(menu_header)
   notice=""
 
-  out=$(menu_rows | pick --multi --delimiter='\t' --with-nth=1 --prompt="gboard > " \
+  out=$(menu_rows | pick --multi --delimiter='\t' --with-nth=1 --prompt="tb > " \
     --header="$header" --header-first --expect=del,ctrl-d \
     --bind="start:pos($focus)" --bind="enter:transform:$self __enter {2} {3} {5}") || exit 0
   jobs=$(cat "$state")   # ticks made inside the menu

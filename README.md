@@ -1,52 +1,124 @@
-# gboard
+<h1><img src="docs/banner.png" alt="Task Board (tb)" width="300"></h1>
 
-![gboard: ticking unit tests on the changed modules, clean and the auto checks, then running them](demo/demo.gif)
+[![tests](https://github.com/cicerohellmann/taskboard/actions/workflows/test.yml/badge.svg)](https://github.com/cicerohellmann/taskboard/actions/workflows/test.yml)
 
-A command board for Gradle projects, for developers (and AI agents) with too many commands under their belt.
+![tb: ticking unit tests on the changed modules, clean and the auto checks, then running them](demo/demo.gif)
 
-Tick the commands you want, pick the modules, press Run. gboard builds one `./gradlew` line in the right order,
-so you stop retyping long task paths or looking up which task does what.
+**Task Board** (`tb`): tick the Gradle tasks you want, pick the modules, press Run.
 
-## What it does
+Like you, I've always had trouble testing exactly what I want to test. Run everything and you wait forever.
+Run one thing by hand and you're retyping long task paths and forgetting which task does what. tb is
+what I built for that: one place to say "these checks, on these modules, these test classes", and it builds
+the command in the right order.
 
-- **Commands, then modules, then test classes.** Pick a command, tick its modules (modules changed on your
-  branch are starred and on top), optionally narrow it down to some test classes, and you're back on the list.
-- **Whole-project commands are just a tick.** Clean, Detekt, Ktlint and similar toggle in place.
-- **Always the right order.** However you tick things, clean runs first, then formatting, checks, tests,
-  builds, reports. Things that change files run as their own build first, so nothing checks half-formatted code.
-- **★ Auto** adds the usual checks on the modules changed on your branch.
-- **Presets.** Save a selection under a name and it sits at the top of the list next time.
-- **History.** `gboard last` reruns the last command, `gboard hist` picks one from before.
-- **For AI agents and scripts.** `gboard print ...` returns the exact command without opening anything
-  (see [below](#for-ai-agents-and-scripts)).
+It's designed for Gradle (Android projects especially), but it can drive other build tools too
+(see [Not only Gradle](#not-only-gradle)).
+
+## ★ Auto: the main feature
+
+tb finds the modules changed on your branch (compared with `main`, including uncommitted and new files)
+and runs your standard tools on them: the ones you marked `auto` in `.tb`, like lint, Detekt, Ktlint and
+unit tests. One command:
+
+```sh
+tb run auto
+```
+
+or the ★ Auto row in the menu.
+
+## Going deep, by hand
+
+When Auto isn't what you want, you choose every part: which commands, which modules for each one, and which
+test classes inside those modules. However you tick things, they run in the right order (clean first, then
+formatting, checks, tests, builds, reports), and anything that changes files runs as its own build first.
+
+## What each row does
+
+The menu: ▶ Run, 💾 Save and ★ Auto first, then your commands.
+
+![The menu, just opened](docs/screens/menu.png)
+
+★ Auto adds lint and unit tests on the modules changed on your branch.
+
+![After ★ Auto](docs/screens/auto.png)
+
+Opening a command lets you pick its modules; the changed ones are starred and on top.
+
+![Picking modules](docs/screens/modules.png)
+
+Narrow a test command down to a few test classes.
+
+![Picking test classes](docs/screens/tests.png)
+
+Whole-project commands like Clean just tick in place; clean runs as its own first build.
+
+![Clean ticked in place](docs/screens/tick.png)
+
+▶ Run shows the full command before running it.
+
+![Run shows the command](docs/screens/run.png)
+
+💾 saves the current selection as a preset.
+
+![Saving a preset](docs/screens/save.png)
+
+Next time, your presets sit at the top of the menu.
+
+![Presets at the top](docs/screens/preset.png)
+
+For scripts and AI agents: `tb print` and `tb list` answer without opening a menu.
+
+![tb print and list](docs/screens/print.png)
+
+`tb last` reruns the last command and `tb hist` picks one from before.
 
 ## Install
 
-macOS or Linux, with `bash`, `git` and [fzf](https://github.com/junegunn/fzf) 0.46 or newer.
-
 ```sh
-curl -fsSL https://raw.githubusercontent.com/cicerohellmann/gboard/main/install.sh | bash
+brew install cicerohellmann/tap/tb
 ```
 
-This puts `gboard` in `~/.local/bin` and installs fzf if it's missing or too old (with Homebrew if you
-have it, otherwise fzf's own release). Linux distro packages of fzf are often older than 0.46, which is why
-it doesn't just use those. From a clone, run `./install.sh` instead.
+That's it on macOS (and Linux with Homebrew); it brings fzf along. Without Homebrew, the installer puts `tb`
+in `~/.local/bin` and installs fzf 0.46+ if yours is missing or older:
 
-Make sure `~/.local/bin` is on your `PATH`, then run `gboard` anywhere inside a project that has `./gradlew`.
+```sh
+curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/install.sh | bash
+```
 
 ## Set it up for your project
 
-Out of the box gboard uses a standard Android list (lint, unit tests, instrumented tests, APK builds, clean).
-To match your project:
+1. `tb init` writes a `.tb` in the project root.
+2. Edit it to list your project's commands.
+3. Mark your standard tools `auto`.
+4. Commit it, so your team and their agents share the list.
 
-```sh
-gboard init     # writes .gboard in the project root
+[`example/.tb`](example/.tb) is a fuller example (formatting, Detekt, Paparazzi, Kover and more).
+
+## Set it up with an AI agent
+
+Paste this into Claude Code, Codex or a similar agent, inside your project:
+
+```text
+Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
+
+1. Find out which build commands this project really uses:
+   - my shell history (~/.zsh_history, ~/.bash_history): ./gradlew lines run in this project
+   - CI workflow files (.github/workflows, .gitlab-ci.yml, bitrise.yml and similar)
+   - build scripts and the plugins they apply (Detekt, Ktlint, Spotless, Paparazzi, Kover...)
+   - README and CONTRIBUTING
+2. Run `tb init`, then rewrite .tb with those commands, following the format and comments in it.
+   Mark the standard checks someone should run before pushing (lint, static analysis, formatting
+   checks, unit tests) as `auto`. Don't add tasks the project doesn't have.
+3. Check it with `tb list` and `tb print auto`.
+4. Add the output of `tb agents` to AGENTS.md or CLAUDE.md.
 ```
 
-Edit `.gboard`. One command per line:
+## Configuration
+
+`.tb` has one command per line:
 
 ```
-# step | label                    | gradle task       | where  | auto
+# step | label                    | task              | where  | auto
 3      | Android lint             | lintDebug         | module | auto
 4      | Unit tests               | testDebugUnitTest | module | auto
 5      | Build debug APK          | assembleDebug     | :app
@@ -58,26 +130,31 @@ Edit `.gboard`. One command per line:
 | Column | Meaning |
 |---|---|
 | step | Run order: 1 clean, 2 changes files, 3 checks, 4 tests, 5 build, 6 reports. Steps 1-2 run as their own build first. |
-| label | What you see in the list. |
-| gradle task | The task name. |
+| label | What you see in the menu. |
+| task | The task name. |
 | where | `module`: you pick modules. `root`: whole project, just a tick. `:something`: always that module. |
 | auto | `auto` means ★ Auto adds it. |
 
-For a fuller list (formatting, Detekt, Paparazzi, Kover and more), see [`example/.gboard`](example/.gboard).
+A `runner:` line sets the command the tasks are passed to (see below).
 
-Commit `.gboard` so your team (and their agents) share the list, or add it to `.git/info/exclude` to keep it
-to yourself. A list in `~/.config/gboard/commands` applies to every project without its own `.gboard`.
+Without a `.tb`, tb uses `~/.config/tb/commands` if it exists, otherwise a standard Android list.
+Modules come from `./gradlew projects`, cached until your settings files change; `tb refresh` re-reads
+them. Presets live in `~/.config/tb/presets/`, history in `~/.tb_history`.
 
-Modules come from `./gradlew projects`, cached until your settings files change. `gboard refresh` re-reads them.
+## Not only Gradle
 
-## Try it without an Android project
+By default the command is `./gradlew --continue --parallel --console=rich` followed by your tasks. To use
+another tool, add a `runner:` line to `.tb`:
 
-```sh
-demo/make-project.sh /tmp/gboard-demo && cd /tmp/gboard-demo && gboard
+```
+runner: make -k
 ```
 
-This builds the made-up project from the GIF, with a stand-in `./gradlew` that only prints task names.
-Copy `example/.gboard` into it to see the fuller list. `vhs demo/demo.tape` re-records the GIF.
+or `runner: just`, and so on. The tasks are appended to it in run order.
+
+Picking modules and test classes needs Gradle (a `./gradlew` in the project). With another runner, module
+commands run on the whole project, and `tb list` shows the runner in use. Ticks, run order, presets, history and ★ Auto work with any runner; without modules, ★ Auto simply
+adds every `auto` command.
 
 ## Keys
 
@@ -90,19 +167,24 @@ Copy `example/.gboard` into it to see the fuller list. `vhs demo/demo.tape` re-r
 
 ## For AI agents and scripts
 
-Everything below works without a terminal and never opens the picker. Run with no terminal attached,
-plain `gboard` prints this help instead of waiting for input.
+These never open a menu and need no terminal. Plain `tb` with no terminal attached prints the help.
 
 ```sh
-gboard list                                   # the commands: step, task, where, label
-gboard modules                                # every Gradle module
-gboard changed                                # modules changed on this branch
-gboard print clean detekt testDebugUnitTest=changed
-# ./gradlew ... clean && ./gradlew ... detekt :notes:editor:testDebugUnitTest
-gboard run lintDebug=:garden assembleDebug   # same, and run it
+tb run auto          # the auto checks on the changed modules
+tb print auto        # the same command, printed instead of run
+tb list              # the commands: step, task, where, auto, label
+tb agents            # a note to paste into AGENTS.md / CLAUDE.md
 ```
 
-What you can pass to `print` and `run`:
+More: `tb modules`, `tb changed`, `tb presets`, `tb history`, `tb help`.
+
+```sh
+tb print clean detekt testDebugUnitTest=changed
+# ./gradlew ... clean && ./gradlew ... detekt :notes:editor:testDebugUnitTest
+tb run lintDebug=:garden assembleDebug
+```
+
+What `print` and `run` take:
 
 | | |
 |---|---|
@@ -111,22 +193,17 @@ What you can pass to `print` and `run`:
 | `auto` | the auto checks, on the modules changed on this branch |
 | `@name` | a saved preset |
 
-Anything not in the list is passed to Gradle as it is. Mistakes (unknown module, missing modules,
+Anything not in the list is passed to the build as it is. Mistakes (unknown module, missing modules,
 unknown preset) exit with 1 and say what's wrong.
 
-`gboard agents` prints a short note to paste into your `AGENTS.md` or `CLAUDE.md`, so agents use your
-project's task names instead of guessing them. `.gboard` explains itself too, so an agent can read it
-without running anything.
+## Try it without an Android project
 
-## Files
+```sh
+demo/make-project.sh /tmp/tb-demo && cd /tmp/tb-demo && tb
+```
 
-| | |
-|---|---|
-| `.gboard` | the command list for a project |
-| `~/.config/gboard/commands` | the command list for projects without one |
-| `~/.config/gboard/presets/` | saved presets, per project |
-| `~/.cache/gboard/` | cached module lists |
-| `~/.gboard_history` | commands run |
+This builds the made-up project from the GIF, with a stand-in `./gradlew` that only prints task names.
+`vhs demo/demo.tape` re-records the GIF.
 
 ## Tests
 
@@ -134,10 +211,9 @@ without running anything.
 tests/run.sh
 ```
 
-The tests build a small fake Gradle project and replace fzf with a script that plays back key presses
-(`tests/fake-fzf`), so they need no Gradle, Android SDK or terminal. GitHub Actions runs them on Linux and
-macOS on every push, and also runs the installer on a clean Linux machine.
+The tests use a small fake Gradle project and replace fzf with a script that plays back key presses, so they
+need no Gradle, Android SDK or terminal. GitHub Actions runs them on Linux and macOS on every push.
 
 ## License
 
-MIT
+[The Unlicense](LICENSE): public domain. Anyone can copy, modify, sell or do anything with it, no conditions.
