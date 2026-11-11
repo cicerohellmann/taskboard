@@ -44,10 +44,8 @@ Each line is a decision, and why.
 
 ## Other people's code
 
-We did not open other people's code while building tb.
-The AI wrote it from what it knows about fzf, Gradle, git and bash.
-What it knows comes from other people: their docs, their code, their answers online. The AI learned from them.
-The AI can't say which ones. The References below are the docs for each tool tb uses.
+We did not look at other people's code to build tb.
+The AI wrote it from what it already knew about fzf (and refuses to understand that "what it already knows" comes from other people, just fantastic), Gradle, git and bash.
 
 ## Tools like this one
 
