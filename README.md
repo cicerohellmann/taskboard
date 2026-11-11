@@ -2,101 +2,147 @@
 
 [![tests](https://github.com/cicerohellmann/taskboard/actions/workflows/test.yml/badge.svg)](https://github.com/cicerohellmann/taskboard/actions/workflows/test.yml)
 
-![tb: ticking unit tests on the changed modules, clean and the auto checks, then running them](demo/demo.gif)
+![tb: ticking unit tests on the modified modules, clean and the auto tasks, then running them](demo/demo.gif)
 
-**Task Board** (`tb`): tick the Gradle tasks you want, pick the modules, press Run.
+Task Board (`tb`) runs Gradle tasks.
+You tick the tasks. You pick the modules. tb runs them in one build, in the right order.
 
-Like you, I've always had trouble testing exactly what I want to test. Run everything and you wait forever.
-Run one thing by hand and you're retyping long task paths and forgetting which task does what. tb is
-what I built for that: one place to say "these checks, on these modules, these test classes", and it builds
-the command in the right order.
+## Why
 
-It's designed for Gradle (Android projects especially), but it can drive other build tools too
-(see [Not only Gradle](#not-only-gradle)).
+Like you, I've always had trouble testing exactly what I want to test.
 
-## ★ Auto: the main feature
+- Running every task takes too long.
+- Running one task by hand means typing long task names.
 
-tb finds the modules changed on your branch (compared with `main`, including uncommitted and new files)
-and runs your standard tools on them: the ones you marked `auto` in `.tb`, like lint, Detekt, Ktlint and
-unit tests. One command:
+tb does two things:
+
+1. **Auto.** tb detects the modified modules and runs your standard tools there.
+2. **By hand.** You go deep into your tasks and your modules, and you define how every task runs.
+
+## Auto
+
+- Your standard tools are the tasks marked `auto` in `.tb`. Example: lint, detekt, ktlint, unit tests.
+- A modified module is a module with changes on your branch, compared with `main`. Uncommitted and new files count.
+- Auto runs the `auto` tasks on the modified modules.
+
+Run it:
 
 ```sh
 tb run auto
 ```
 
-or the ★ Auto row in the menu.
+Or pick ★ Auto in the menu.
 
-## Going deep, by hand
+## By hand
 
-When Auto isn't what you want, you choose every part: which commands, which modules for each one, and which
-test classes inside those modules. However you tick things, they run in the right order (clean first, then
-formatting, checks, tests, builds, reports), and anything that changes files runs as its own build first.
+- Pick a task.
+- Pick its modules.
+- Pick its test classes.
+- Tick more tasks.
+- Run.
 
-## What each row does
+tb runs the tasks in this order, always:
 
-The menu: ▶ Run, 💾 Save and ★ Auto first, then your commands.
+| Step | Tasks |
+|---|---|
+| 1 | clean |
+| 2 | tasks that change files (formatting) |
+| 3 | checks |
+| 4 | tests |
+| 5 | builds |
+| 6 | reports |
 
-![The menu, just opened](docs/screens/menu.png)
+Steps 1 and 2 run as their own build first.
 
-★ Auto adds lint and unit tests on the modules changed on your branch.
+## The menu, row by row
 
-![After ★ Auto](docs/screens/auto.png)
+### Main menu
 
-Opening a command lets you pick its modules; the changed ones are starred and on top.
+| Row | What it does |
+|---|---|
+| `▶ Run` | Shows the command. Confirm runs it. |
+| `💾 Save as preset` | Saves the ticked tasks as a preset. |
+| `★ Auto: checks on changed modules (:garden, :notes:editor)` | Ticks the `auto` tasks on the modified modules. |
+| `Instrumented tests (needs a device)` | A task. ENTER opens it. You pick its modules. |
+| `✓ Unit tests → :garden, :notes:editor · 1 test class` | A ticked task, with its modules and test classes. |
+| `✓ Clean → whole project` | A ticked whole-project task. Whole-project tasks tick with ENTER. No module screen. |
+| `● before-push · Unit tests, Clean` | A preset. ENTER shows its command, then runs it or deletes it. DEL deletes it. |
 
-![Picking modules](docs/screens/modules.png)
+Top of the main menu:
 
-Narrow a test command down to a few test classes.
+| Line | What it shows |
+|---|---|
+| `★ Added the auto checks; module ones on :garden, :notes:editor` | What the last action did. |
+| `./gradlew --continue --parallel --console=rich :garden:lintDebug :garden:testDebugUnitTest` | The command that will run. |
 
-![Picking test classes](docs/screens/tests.png)
+### Modules screen
 
-Whole-project commands like Clean just tick in place; clean runs as its own first build.
+| Row | What it does |
+|---|---|
+| `◆ ALL MODULES` | Runs the task on every module. |
+| `★ :garden` | A modified module. Modified modules are at the top. TAB ticks it. |
 
-![Clean ticked in place](docs/screens/tick.png)
+### Test classes screen
 
-▶ Run shows the full command before running it.
+| Row | What it does |
+|---|---|
+| `◆ ALL tests in these modules` | Runs every test class in the picked modules. |
+| `★ MarkdownParserTest (:notes:editor)` | A test class in a modified file. TAB ticks it. |
+| `📸 EditorScreenshotTest (:notes:editor)` | A screenshot test class (Paparazzi). |
 
-![Run shows the command](docs/screens/run.png)
+### Run screen
 
-💾 saves the current selection as a preset.
+| Row | What it does |
+|---|---|
+| `./gradlew ... clean && ./gradlew ... :notes:editor:testDebugUnitTest` | The command. |
+| `✖ Cancel, back` | Goes back to the main menu. |
+| `✔ Confirm, run it` | Runs the command. |
 
-![Saving a preset](docs/screens/save.png)
+### Save screen
 
-Next time, your presets sit at the top of the menu.
+| Row | What it does |
+|---|---|
+| `name > before-push` | Type the preset name. ENTER saves. |
 
-![Presets at the top](docs/screens/preset.png)
+## Keys
 
-For scripts and AI agents: `tb print` and `tb list` answer without opening a menu.
-
-![tb print and list](docs/screens/print.png)
-
-`tb last` reruns the last command and `tb hist` picks one from before.
+| Key | What it does |
+|---|---|
+| ENTER | Opens a task. Ticks a whole-project task. |
+| TAB | Ticks several rows. |
+| DEL / CTRL-D | Deletes a preset. |
+| ESC | Back. Quit. |
 
 ## Install
+
+macOS or Linux, with Homebrew:
 
 ```sh
 brew install cicerohellmann/tap/tb
 ```
 
-That's it on macOS (and Linux with Homebrew); it brings fzf along. Without Homebrew, the installer puts `tb`
-in `~/.local/bin` and installs fzf 0.46+ if yours is missing or older:
+Without Homebrew:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/install.sh | bash
 ```
 
-## Set it up for your project
+The installer puts `tb` in `~/.local/bin`. It installs fzf 0.46 or newer if fzf is missing or older.
 
-1. `tb init` writes a `.tb` in the project root.
-2. Edit it to list your project's commands.
+tb needs `bash`, `git` and [fzf](https://github.com/junegunn/fzf) 0.46 or newer.
+
+## Set it up
+
+1. Run `tb init` in the project root. It writes `.tb`.
+2. Edit `.tb`. List your project's tasks.
 3. Mark your standard tools `auto`.
-4. Commit it, so your team and their agents share the list.
+4. Commit `.tb`. Your team and their AI agents use the same list.
 
-[`example/.tb`](example/.tb) is a fuller example (formatting, Detekt, Paparazzi, Kover and more).
+[`example/.tb`](example/.tb) is a full example.
 
 ## Set it up with an AI agent
 
-Paste this into Claude Code, Codex or a similar agent, inside your project:
+Paste this into Claude Code, Codex or another agent, inside your project:
 
 ```text
 Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
@@ -113,9 +159,9 @@ Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
 4. Add the output of `tb agents` to AGENTS.md or CLAUDE.md.
 ```
 
-## Configuration
+## The .tb file
 
-`.tb` has one command per line:
+One task per line:
 
 ```
 # step | label                    | task              | where  | auto
@@ -127,83 +173,92 @@ Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
 2      | Ktlint: fix formatting   | ktlintFormat      | root
 ```
 
-| Column | Meaning |
+| Column | What it means |
 |---|---|
-| step | Run order: 1 clean, 2 changes files, 3 checks, 4 tests, 5 build, 6 reports. Steps 1-2 run as their own build first. |
-| label | What you see in the menu. |
-| task | The task name. |
-| where | `module`: you pick modules. `root`: whole project, just a tick. `:something`: always that module. |
-| auto | `auto` means ★ Auto adds it. |
+| step | The run order, 1 to 6. See [By hand](#by-hand). |
+| label | The name in the menu. |
+| task | The Gradle task. |
+| where | `module`: you pick modules. `root`: the whole project. `:name`: always that module. |
+| auto | `auto`: Auto runs this task. |
 
-A `runner:` line sets the command the tasks are passed to (see below).
+Where tb looks for the task list:
 
-Without a `.tb`, tb uses `~/.config/tb/commands` if it exists, otherwise a standard Android list.
-Modules come from `./gradlew projects`, cached until your settings files change; `tb refresh` re-reads
-them. Presets live in `~/.config/tb/presets/`, history in `~/.tb_history`.
+1. `.tb` in the project root.
+2. `~/.config/tb/commands`.
+3. The built-in Android list.
+
+Other files:
+
+| File | What it holds |
+|---|---|
+| `~/.config/tb/presets/` | Presets. |
+| `~/.tb_history` | History. |
+| `~/.cache/tb/` | The module list. tb reads it again when the settings files change. `tb refresh` reads it again now. |
 
 ## Not only Gradle
 
-By default the command is `./gradlew --continue --parallel --console=rich` followed by your tasks. To use
-another tool, add a `runner:` line to `.tb`:
+tb is designed for Gradle. You can use it with anything else.
+
+Add a `runner:` line to `.tb`:
 
 ```
 runner: make -k
 ```
 
-or `runner: just`, and so on. The tasks are appended to it in run order.
+- tb puts the tasks after the runner, in run order.
+- Without `./gradlew`, there are no modules. Every task runs on the whole project.
+- Auto runs every `auto` task.
 
-Picking modules and test classes needs Gradle (a `./gradlew` in the project). With another runner, module
-commands run on the whole project, and `tb list` shows the runner in use. Ticks, run order, presets, history and ★ Auto work with any runner; without modules, ★ Auto simply
-adds every `auto` command.
+The default runner is `./gradlew --continue --parallel --console=rich`.
 
-## Keys
+## For scripts and AI agents
 
-| Key | |
+These commands never open the menu:
+
+| Command | What it does |
 |---|---|
-| ENTER | open a command, or tick a whole-project one |
-| TAB | tick several |
-| DEL / CTRL-D | delete a preset |
-| ESC | back / quit |
+| `tb run auto` | Runs the `auto` tasks on the modified modules. |
+| `tb print auto` | Prints the same command. Does not run it. |
+| `tb run SPEC...` | Runs these tasks. |
+| `tb print SPEC...` | Prints the command for these tasks. |
+| `tb list` | Lists the tasks: step, task, where, auto, label. |
+| `tb modules` | Lists every module. |
+| `tb changed` | Lists the modified modules. |
+| `tb presets` | Lists the presets. |
+| `tb history` | Lists the commands run before. |
+| `tb last` | Runs the last command again. |
+| `tb hist` | Picks a command run before and runs it again. |
+| `tb agents` | Prints a note for AGENTS.md or CLAUDE.md. |
+| `tb help` | Prints the help. Same as `tb -h`. |
 
-## For AI agents and scripts
+SPEC is one of:
 
-These never open a menu and need no terminal. Plain `tb` with no terminal attached prints the help.
+| SPEC | What it means |
+|---|---|
+| `task` | A whole-project or fixed-module task. Example: `detekt`. |
+| `task=:a,:b` | A module task on modules `:a` and `:b`. |
+| `task=ALL` | A module task on every module. |
+| `task=changed` | A module task on the modified modules. |
+| `auto` | The `auto` tasks on the modified modules. |
+| `@name` | A preset. |
 
-```sh
-tb run auto          # the auto checks on the changed modules
-tb print auto        # the same command, printed instead of run
-tb list              # the commands: step, task, where, auto, label
-tb agents            # a note to paste into AGENTS.md / CLAUDE.md
-```
-
-More: `tb modules`, `tb changed`, `tb presets`, `tb history`, `tb help`.
+Example:
 
 ```sh
 tb print clean detekt testDebugUnitTest=changed
 # ./gradlew ... clean && ./gradlew ... detekt :notes:editor:testDebugUnitTest
-tb run lintDebug=:garden assembleDebug
 ```
 
-What `print` and `run` take:
+A task that is not in the list goes to the build as it is.
+A mistake (unknown module, no modules, unknown preset) exits with 1 and says what is wrong.
 
-| | |
-|---|---|
-| `task` | a whole-project or fixed-module command, e.g. `detekt` |
-| `task=:a,:b` | a per-module command on those modules (`=ALL` and `=changed` work too) |
-| `auto` | the auto checks, on the modules changed on this branch |
-| `@name` | a saved preset |
-
-Anything not in the list is passed to the build as it is. Mistakes (unknown module, missing modules,
-unknown preset) exit with 1 and say what's wrong.
-
-## Try it without an Android project
+## Try it
 
 ```sh
 demo/make-project.sh /tmp/tb-demo && cd /tmp/tb-demo && tb
 ```
 
-This builds the made-up project from the GIF, with a stand-in `./gradlew` that only prints task names.
-`vhs demo/demo.tape` re-records the GIF.
+This makes the project from the GIF. Its `./gradlew` only prints the task names.
 
 ## Tests
 
@@ -211,9 +266,10 @@ This builds the made-up project from the GIF, with a stand-in `./gradlew` that o
 tests/run.sh
 ```
 
-The tests use a small fake Gradle project and replace fzf with a script that plays back key presses, so they
-need no Gradle, Android SDK or terminal. GitHub Actions runs them on Linux and macOS on every push.
+- The tests use a fake Gradle project and a fake fzf.
+- They need no Gradle, no Android SDK and no terminal.
+- GitHub Actions runs them on Linux and macOS on every push.
 
 ## License
 
-[The Unlicense](LICENSE): public domain. Anyone can copy, modify, sell or do anything with it, no conditions.
+[The Unlicense](LICENSE). Copy it, change it, sell it, do whatever you want with it.
