@@ -5,7 +5,7 @@
 # step  | label                                | gradle task                | where   | auto
 #   step   run order: 1 clean, 2 changes files, 3 checks, 4 tests, 5 build, 6 reports (1-2 run as their own build first)
 #   where  module = you pick modules, root = whole project (just a tick), :name = always that module
-#   auto   "auto" = ★ Auto adds it, on the modules changed on your branch
+#   auto   "auto" = ★ Auto adds it, on the modules changed on your branch and the modules that depend on them
 #
 # runner: the command the tasks are added to. This is the default; change it for other build tools (make -k, just...)
 # runner: ./gradlew --continue --parallel --console=rich

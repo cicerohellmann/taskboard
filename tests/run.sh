@@ -58,6 +58,10 @@ echo x > lib/a/src/main/A.kt
 echo 'class ATest' > lib/a/src/test/java/ATest.kt
 echo 'class BTest' > lib/b/src/test/java/BTest.kt
 echo 'class BScreenshotTest { val paparazzi = Paparazzi() }' > lib/b/src/test/java/BScreenshotTest.kt
+# dependencies: :lib:a and :app use :lib:b, :generated uses :app (the commented one doesn't count)
+printf "dependencies {\n    testImplementation project(path: ':lib:b')\n}\n" > lib/a/build.gradle
+printf 'dependencies {\n    implementation(projects.lib.b)\n    // implementation(project(":lib:a"))\n}\n' > app/build.gradle.kts
+mkdir -p generated && printf 'dependencies { implementation(project(":app")) }\n' > generated/build.gradle.kts
 cat > .tb <<'EOF'
 # step | label | task | where | auto
 4 | Unit tests                | testDebugUnitTest    | module | auto
@@ -160,6 +164,20 @@ check "changed is back" ":lib:a" "$(gb changed)"
 check "changes committed on the branch count too" ":lib:a" "$(gb changed)"
 contains "and auto uses them" "$(gb print auto 2>/dev/null)" ":lib:a:testDebugUnitTest"
 (cd "$REPO" && git reset -q HEAD~1)
+
+echo "== affected: changed modules and the modules that depend on them"
+check "nothing depends on :lib:a, so affected is just :lib:a" ":lib:a" "$(gb affected)"
+(cd "$REPO" && echo y >> lib/b/src/test/java/BTest.kt)
+check "changed: :lib:a and :lib:b" "$(printf ':lib:a\n:lib:b')" "$(gb changed)"
+check "affected follows project(path:), projects.x accessors and dependents of dependents" \
+  "$(printf ':app\n:generated\n:lib:a\n:lib:b')" "$(gb affected)"
+check "auto runs on the affected modules" \
+  "$P detekt :app:testDebugUnitTest :generated:testDebugUnitTest :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" "$(gb print auto)"
+check "=affected works in a SPEC" "$P :app:testDebugUnitTest :generated:testDebugUnitTest :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" \
+  "$(gb print testDebugUnitTest=affected)"
+check "=changed stays the changed modules only" "$P :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" \
+  "$(gb print testDebugUnitTest=changed)"
+(cd "$REPO" && git checkout -q lib/b/src/test/java/BTest.kt)
 
 echo "== run, history, last, hist"
 out=$(gb last 2>&1); rc=$?

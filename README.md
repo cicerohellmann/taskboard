@@ -19,7 +19,7 @@ Like you, I've always had trouble testing exactly what I want to test.
 
 tb does two things:
 
-1. **Auto.** tb finds the changed modules and runs your `auto` tasks there.
+1. **Auto.** tb finds the changed modules, and the modules that depend on them, and runs your `auto` tasks there.
 2. **By hand.** You go deep into your tasks and your modules. You pick the tasks, the modules for each task, and the test classes for each test task.
 
 ## Words
@@ -33,6 +33,7 @@ tb does two things:
 | fixed-module task | A task that always runs on one module. Example: `:app:assembleDebug`. |
 | `auto` task | A task marked `auto` in the task list. Your standard checks: lint, detekt, unit tests. |
 | changed module | A module with a changed file on your branch. See [Auto](#auto). |
+| affected module | A changed module, or a module that depends on a changed module. See [Auto](#auto). |
 | tick | Select a row. ENTER ticks one row. TAB ticks several rows. |
 | preset | A saved set of ticked tasks, with their modules and test classes. |
 | step | The run order of a task, 1 to 6. See [Step order](#step-order). |
@@ -153,11 +154,19 @@ tb runs the tasks in this order, always:
 - A changed module is a module with a changed file on your branch.
 - Changed files: the files changed since your branch left `main` (`origin/main` first, then `main`), plus uncommitted and new files.
 - A file belongs to the deepest module folder that contains it.
-- tb does not follow the dependency graph. A module that depends on a changed module is not a changed module.
+
+Affected modules:
+
+- An affected module is a changed module, or a module that depends on a changed module.
+- Dependencies of dependencies count too. `:app` uses `:feature`, `:feature` uses `:core`, `:core` changed: all three are affected.
+- tb reads the dependencies from each module's `build.gradle` or `build.gradle.kts`.
+- tb finds `project(":core")`, `project(path = ":core")`, `project(path: ':core')` and `projects.core`.
+- Lines that start with `//` don't count.
+- tb does not run Gradle for this. Dependencies added by plugins or convention plugins are not found.
 
 Auto ticks the `auto` tasks:
 
-- `auto` module tasks run on the changed modules.
+- `auto` module tasks run on the affected modules.
 - `auto` whole-project tasks run on the whole project.
 - No changed modules: Auto ticks nothing. `tb run auto` and `tb print auto` exit with 1.
 
@@ -192,7 +201,7 @@ The rows, from the top:
 | `● before-push  ·  Unit tests, Clean` | A preset. ENTER opens the preset screen. DEL deletes it. |
 | `▶ Run` | Opens the run screen. |
 | `💾 Save as preset` | Opens the save screen. |
-| `★ Auto: checks on changed modules (:garden, :notes:editor)` | Ticks the `auto` tasks. See [Auto](#auto). Shows only when there are changed modules. |
+| `★ Auto: checks on changed modules and their dependents (:garden, :notes:editor)` | Ticks the `auto` tasks. See [Auto](#auto). Shows only when there are changed modules. |
 | `  Instrumented tests (needs a device)` | A task, not ticked. ENTER opens its modules screen. |
 | `✓ Unit tests  → :garden, :notes:editor · 1 test class` | A ticked module task, with its modules and test classes. ENTER opens its modules screen again. |
 | `✓ Clean  → whole project` | A ticked whole-project task. ENTER unticks it. |
@@ -296,6 +305,7 @@ The default runner is `./gradlew --continue --parallel --console=rich`.
 | `tb list` | Lists the task list: step, task, where, auto, label. |
 | `tb modules` | Lists every module. |
 | `tb changed` | Lists the changed modules. |
+| `tb affected` | Lists the affected modules. |
 | `tb presets` | Lists this project's presets. |
 | `tb history` | Lists this project's last 20 commands, without repeats. |
 | `tb last` | Runs this project's last command again. |
@@ -313,6 +323,7 @@ SPEC is one of:
 | `task=:a,:b` | A module task on modules `:a` and `:b`. The `:` is optional: `task=a,b`. |
 | `task=ALL` | A module task on every module. |
 | `task=changed` | A module task on the changed modules. |
+| `task=affected` | A module task on the affected modules. |
 | `auto` | The `auto` tasks. |
 | `@name` | A preset. |
 

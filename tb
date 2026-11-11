@@ -146,6 +146,53 @@ else
   ' <(printf '%s\n' "$all_modules") <(printf '%s\n' "$changed_files") | sort)
 fi
 
+# Module dependencies, read from each module's build file: prints "dependency <TAB> dependent".
+# Finds project(":a:b"), project(path = ":a:b"), project(path: ':a:b') and type-safe accessors (projects.a.b).
+module_deps() {
+  local m d f pairs=""
+  while read -r m; do
+    [ -n "$m" ] || continue
+    d=${m#:}; d=${d//://}
+    for f in "$d/build.gradle.kts" "$d/build.gradle"; do [ -f "$f" ] && pairs="$pairs$f	$m"$'\n'; done
+  done <<< "$all_modules"
+  [ -n "$pairs" ] || return 0
+  # shellcheck disable=SC2046 # build file paths have no spaces
+  awk -F'\t' -v q="'" -v mods="$(printf '%s' "$all_modules" | tr '\n' ' ')" -v pairs="$(printf '%s' "$pairs" | tr '\t\n' '= ')" '
+    function camel(s,   out, i, c, up) { out = ""; up = 0
+      for (i = 1; i <= length(s); i++) { c = substr(s, i, 1)
+        if (c == "-" || c == "_") { up = 1; continue }
+        out = out (up ? toupper(c) : c); up = 0 }
+      return out }
+    function dep(d) { if (d !~ /^:/) d = ":" d; if ((d in known) && d != owner[FILENAME]) print d "\t" owner[FILENAME] }
+    BEGIN {
+      n = split(mods, ms, " "); for (i = 1; i <= n; i++) known[ms[i]] = 1
+      n = split(pairs, ps, " "); for (i = 1; i <= n; i++) if (split(ps[i], kv, "=") == 2) owner[kv[1]] = kv[2]
+      for (k in known) { n = split(substr(k, 2), p, ":"); a = camel(p[1]); for (i = 2; i <= n; i++) a = a "." camel(p[i]); acc[a] = k }
+      re = "project\\([[:space:]]*(path[[:space:]]*[:=][[:space:]]*)?[\"" q "][^\"" q "]+[\"" q "]" }
+    /^[[:space:]]*\/\// { next }
+    { line = $0
+      while (match(line, re)) { s = substr(line, RSTART, RLENGTH); line = substr(line, RSTART + RLENGTH)
+        s = substr(s, 1, length(s) - 1); sub(".*[\"" q "]", "", s); dep(s) }
+      line = $0
+      while (match(line, /projects(\.[A-Za-z0-9_]+)+/)) { s = substr(line, RSTART + 9, RLENGTH - 9); line = substr(line, RSTART + RLENGTH)
+        while (s != "" && !(s in acc)) { if (index(s, ".") == 0) s = ""; else sub(/\.[^.]*$/, "", s) }
+        if (s != "") dep(acc[s]) } }
+  ' $(printf '%s' "$pairs" | cut -f1) | sort -u
+}
+
+# Changed modules plus every module that depends on one of them, directly or through other modules
+if [ -n "${GB_STATE:-}" ]; then affected=${GB_AFFECTED:-}
+elif [ -z "$changed" ]; then affected=""
+else
+  affected=$(awk -F'\t' '
+    NR == FNR { if ($0 != "") { seen[$0] = 1; queue[++n] = $0 }; next }
+    { users[$1] = users[$1] " " $2 }
+    END { for (i = 1; i <= n; i++) { k = split(users[queue[i]], u, " ")
+            for (j = 1; j <= k; j++) if (!(u[j] in seen)) { seen[u[j]] = 1; queue[++n] = u[j] } }
+          for (m in seen) print m }
+  ' <(printf '%s\n' "$changed") <(module_deps) | sort)
+fi
+
 module_rows=$( {
   echo "◆ ALL MODULES"
   [ -n "$changed" ] && printf '%s\n' "$changed" | sed 's/^/★ /'
@@ -329,10 +376,10 @@ TAB tick several test classes · ★ changed · 📸 screenshot · ENTER done ·
   done <<< "$mtasks"
 }
 
-# The usual CI checks, on the modules changed on this branch (without Gradle: just the auto commands)
+# The usual CI checks, on the modules changed on this branch and the modules that depend on them (without Gradle: just the auto commands)
 auto_changed() {
   [ -n "$changed" ] || [ -z "$gradle" ] || { notice="⚠ No changed modules found on this branch"; return; }
-  local mods; mods=$(printf '%s\n' "$changed" | tr '\n' ' ' | sed 's/ $//')
+  local mods; mods=$(printf '%s\n' "$affected" | tr '\n' ' ' | sed 's/ $//')
   while IFS=$'\t' read -r label task scope _ auto; do
     [ "$auto" = auto ] || continue
     [ "$scope" = module ] || { set_job "$task" "$label" "$scope" "" ""; continue; }
@@ -341,7 +388,7 @@ auto_changed() {
     set_job "$task" "$label" "$scope" "$(printf '%s %s' "$old" "$mods" | tr ' ' '\n' | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')" "$(job_field "$task" 5)"
   done <<< "$commands"
   notice="★ Added the auto checks"
-  [ -z "$gradle" ] || notice="$notice; module ones on $(printf '%s\n' "$changed" | summary 3)"
+  [ -z "$gradle" ] || notice="$notice; module ones on $(printf '%s\n' "$affected" | summary 3)"
 }
 
 # Presets: one file per preset holding job lines. Most recently used first.
@@ -385,8 +432,9 @@ usage() {
 Task Board (tb): a task board for Gradle. Tick tasks, pick modules, and tb builds
 one command line that runs them in the right order (clean, formatting, checks, tests, builds).
 
-  ★ Auto     the main path: finds the modules changed on your branch and runs the standard
-             tools marked "auto" in .tb (lint, detekt, ktlint, unit tests...) on them
+  ★ Auto     the main path: finds the modules changed on your branch, and the modules that
+             depend on them, and runs the standard tools marked "auto" in .tb (lint, detekt,
+             ktlint, unit tests...) on them
   by hand    or go deep: choose each command, its modules and its test classes yourself
 
 Menu keys: ENTER open/tick · TAB tick several · ESC back/quit · DEL delete preset
@@ -399,6 +447,7 @@ Runner: $gradle_prefix
   tb list            the commands: step, task, where it runs, auto, label
   tb modules         every Gradle module
   tb changed         modules changed on this branch
+  tb affected        changed modules and the modules that depend on them
   tb presets         saved presets and the command each one runs
   tb history         commands run here before, newest last
   tb last            rerun the last command
@@ -409,9 +458,9 @@ Runner: $gradle_prefix
   tb help            this text
 
 SPEC is one of:
-  auto                   the auto checks, on the modules changed on this branch
+  auto                   the auto checks, on the changed modules and their dependents
   task                   a whole-project or fixed-module command, e.g. detekt
-  task=:a,:b             a per-module command on those modules (=ALL and =changed work too)
+  task=:a,:b             a per-module command on those modules (=ALL, =changed, =affected work too)
   @name                  a saved preset
 Anything not in the list is passed on as it is.
 
@@ -429,9 +478,9 @@ agents_note() {
 
 This repo's build tasks are listed in `.tb` (`tb list` shows them). Use those task names; don't guess Gradle task names.
 
-- First choice: `tb run auto` runs the standard checks (lint, static analysis, unit tests...) on the modules changed on this branch. `tb print auto` shows the command without running it.
+- First choice: `tb run auto` runs the standard checks (lint, static analysis, unit tests...) on the modules changed on this branch and the modules that depend on them. `tb print auto` shows the command without running it.
 - Specific tasks: `tb print detekt testDebugUnitTest=changed` prints the exact command, in the right order. `tb run ...` runs it.
-- `tb changed` lists modules changed on this branch; `tb modules` lists all of them; `tb help` has the rest.
+- `tb changed` lists modules changed on this branch; `tb affected` adds the modules that depend on them; `tb modules` lists all of them; `tb help` has the rest.
 - Without tb: the runner from `tb list` (default `./gradlew`) with whole-project tasks as they are, per-module tasks as `:module:task`. Steps 1-2 (clean, formatting) go in their own run before the rest.
 EOF
 }
@@ -452,10 +501,13 @@ jobs_from_specs() {
     if [ -z "$line" ]; then set_job "$task" "$task" root "" ""; continue; fi
     if [ "$(cut -f3 <<< "$line")" != module ]; then set_job "$task" "$(cut -f1 <<< "$line")" "$(cut -f3 <<< "$line")" "" ""; continue; fi
     case "$mods" in
-      "") echo "$task runs per module: use $task=:module,:other (or =ALL, =changed)" >&2; return 1 ;;
+      "") echo "$task runs per module: use $task=:module,:other (or =ALL, =changed, =affected)" >&2; return 1 ;;
       ALL) ;;
       changed)
         mods=$(printf '%s\n' "$changed" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')
+        [ -n "$mods" ] || { echo "No modules changed on this branch" >&2; return 1; } ;;
+      affected)
+        mods=$(printf '%s\n' "$affected" | sed '/^$/d' | tr '\n' ' ' | sed 's/ $//')
         [ -n "$mods" ] || { echo "No modules changed on this branch" >&2; return 1; } ;;
       *)
         fixed=""
@@ -480,6 +532,7 @@ case "${1:-}" in
     exit 0 ;;
   modules) printf '%s\n' "$all_modules" | sed '/^$/d'; exit 0 ;;
   changed) printf '%s\n' "$changed" | sed '/^$/d'; exit 0 ;;
+  affected) printf '%s\n' "$affected" | sed '/^$/d'; exit 0 ;;
   presets)
     ls -t "$preset_dir" 2>/dev/null | while read -r n; do printf '@%s\n  %s\n' "$n" "$(full_command < "$preset_dir/$n")"; done
     exit 0 ;;
@@ -506,7 +559,7 @@ menu_rows() { # display <TAB> kind <TAB> value [<TAB> label <TAB> scope]
   # Always listed, so rows below never shift when the first command is ticked
   printf '▶ Run\trun\t\n'
   printf '💾 Save as preset\tsave\t\n'
-  if [ -n "$changed" ]; then printf '★ Auto: checks on changed modules (%s)\tauto\t\n' "$(printf '%s\n' "$changed" | summary 2)"
+  if [ -n "$changed" ]; then printf '★ Auto: checks on changed modules and their dependents (%s)\tauto\t\n' "$(printf '%s\n' "$affected" | summary 2)"
   elif [ -z "$gradle" ]; then printf '★ Auto: the auto checks\tauto\t\n'; fi
   while IFS=$'\t' read -r label task scope _; do
     line=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$task" '$1==t')
@@ -555,7 +608,7 @@ awk -v v="$fzf_version" 'BEGIN { split(v, x, "."); exit !(x[1] > 0 || x[2] >= 46
   || { echo "tb needs fzf 0.46 or newer, this is $fzf_version. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
 state=$(mktemp "${TMPDIR:-/tmp}/tb.XXXXXX")
 trap 'rm -f "$state"' EXIT
-export GB_STATE=$state GB_CHANGED=$changed
+export GB_STATE=$state GB_CHANGED=$changed GB_AFFECTED=$affected
 
 notice=""
 focus_kind="" focus_value=""

@@ -30,6 +30,8 @@ Each line is a decision, and why.
 | Presets, history, `tb last`. | The same set of tasks runs many times a day. |
 | The task list lives in `.tb`, in the project. | Every project has different tasks. The team shares one file. |
 | Auto is the first-class feature. | The most common case: run the standard checks on the modules I changed, before I push. |
+| Auto also runs on the modules that depend on a changed module. | A change in `:core` can break `:app`. The affected-module plugins below do this; we added it after we found them. |
+| Dependencies come from the build files, not from Gradle. | Running Gradle to get the graph is slow. Reading the build files takes a fraction of a second. |
 | You can still go deep by hand. | Sometimes you want one task, on one module, on one test class. |
 | `tb print` and `tb run` never open the menu. | AI agents and scripts can't use a menu. They get the same tasks and the same order. |
 | `runner:` line. | tb is designed for Gradle. It can be used with anything else. |
@@ -42,6 +44,7 @@ Each line is a decision, and why.
 - **The README.** The first version was too long and told a story. We rewrote it as a manual: short lines, the same words every time.
 - **The screenshots.** First, full screenshots with an arrow on the row. Then, a picture of only that row. Then, no pictures: the row text in `code`.
 - **Install.** First an install script. Then Homebrew: `brew install cicerohellmann/tap/tb`.
+- **Affected modules.** First Auto ran only on the changed modules. After we looked at tools like this one, Auto also runs on the modules that depend on them.
 - **Review.** Before publishing, separate AI agents read the README. One checked every claim against the code. One read it as a new user. One checked every file and every link.
 
 ## Other people's code
@@ -56,7 +59,7 @@ We looked for tools like tb after it was built. We did not want to make somethin
 Short answer: no tool we found does the whole thing. There are two groups:
 
 - **Pickers.** They pick a task and run it. They don't pick modules, test classes, or changed modules.
-- **Affected-module plugins.** They find changed modules, and do it better than tb. They have no menu.
+- **Affected-module plugins.** They find changed modules and their dependents. They have no menu.
 
 tb sits between the two.
 
@@ -84,11 +87,10 @@ tb sits between the two.
 
 ### Where tb is weaker
 
-- tb does not follow the dependency graph. A module that depends on a changed module is not checked by Auto. The plugins above do this.
+- tb reads the dependencies from the build files. The plugins ask Gradle. Dependencies added by plugins or convention plugins are found by the plugins, not by tb.
+- A change in build logic (`buildSrc`, `build-logic`, the version catalog) does not make every module affected in tb. Some plugins do this.
 - tb shows the output in the terminal and nothing more. lazygradle keeps it.
 - tb needs a `.tb` file per project. nur and task-runner-detector need no config.
-
-A possible next step: let Auto take its module list from one of these plugins, to get the dependent modules too.
 
 What we checked: each tool's own README or docs, a GitHub search for Gradle pickers and affected-module tools, and the Gradle docs. We did not check IntelliJ Marketplace plugins or Develocity.
 
