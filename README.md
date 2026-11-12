@@ -82,17 +82,21 @@ ESC goes back. [MANUAL.md](MANUAL.md#the-menu-row-by-row) explains every row and
 
 ## Set it up for your project
 
-tb does not read your project's tasks. You write the task list yourself, in a `.tb` file in the project root.
+The task list is a `.tb` file in the project root. `tb init` writes it from your project's own tasks.
 
-1. Run `tb init`. It writes `.tb` with a starting task list for Android: lint, unit tests, instrumented tests, APK builds and clean. Detekt, ktlint, Spotless, Paparazzi, Roborazzi and Kover are in it as comment lines. `tb init` writes the same list in every project. It does not look at your project.
-2. Edit `.tb`. Delete the tasks your project doesn't have. Add the tasks it has. Remove the `#` from the comment lines you want.
-3. Mark the tasks Auto should run with `auto`.
-4. Check it with `tb list`.
-5. Commit `.tb`. Your team uses the same task list.
+1. Run `tb init` in the project. It asks Gradle for every task of every module. This takes a few seconds.
+2. It shows a list to tick:
+   - Tasks you ran before from your shell history, with `★` and the number of runs. Ticked.
+   - Common Android tasks your project has: lint, detekt, ktlint, unit tests, Paparazzi, APK builds, clean. Ticked.
+   - Every other task. Type to search them. Not ticked.
+3. TAB ticks or unticks a task. CTRL-T turns `auto` on or off. Checks and tests are `auto` at the start.
+4. ENTER writes `.tb`. If there is a `.tb` already, it is saved as `.tb.bak`, and its lines that are not in the list are kept.
+5. Check it with `tb list`.
+6. Commit `.tb`. Your team uses the same task list.
 
-Without a `.tb` file, tb uses the same starting task list.
+`tb init --defaults` writes the built-in task list without asking. Without a `.tb` file, tb uses the built-in task list.
 
-To let an AI agent write `.tb` for you, see [docs/AI.md](docs/AI.md#set-up-tb-for-a-project).
+Editing `.tb` by hand is optional. To let an AI agent write `.tb` for you, see [docs/AI.md](docs/AI.md#set-up-tb-for-a-project).
 
 ### Write .tb by hand
 
@@ -129,7 +133,7 @@ cd /tmp/tb-demo
 tb
 ```
 
-The demo project has changed files in `:garden` and `:notes:editor`, so Auto has modules to run on. Its `./gradlew` only prints the task names.
+The demo project has changed files in `:garden` and `:notes:editor`, so Auto has modules to run on. Its `./gradlew` only prints the task names, and it gives `tb init` a made-up task list.
 
 ## License
 

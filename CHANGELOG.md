@@ -2,9 +2,37 @@
 
 What changed in each version of tb. The words are in [docs/WORDS.md](docs/WORDS.md).
 
-## Not released yet
+## 0.4.0 (2026-11-12)
 
+### New
+
+- `tb init` asks Gradle for every task of every module and opens a list to tick. ENTER writes the ticked tasks to `.tb`. See [tb init](MANUAL.md#tb-init).
+  - Tasks you ran before from your shell history come first, with `★` and the number of runs. Then the common Android tasks your project has. Both are ticked.
+  - Type to search every other task.
+  - TAB ticks a task. CTRL-T turns `auto` on or off.
+  - Each row shows the label, the task, where it runs, and its description from Gradle.
+  - With a `.tb` already, its tasks are ticked. ENTER saves the old one as `.tb.bak` and keeps its lines that are not in the list.
+- `tb init --defaults` writes the built-in task list, as `tb init` did before. `tb init` without a terminal does the same.
+- While tb waits for Gradle on a terminal, it shows `Reading tasks from Gradle… 4s`. CTRL-C stops it.
+- tb keeps the tasks of each module in `~/.cache/tb/`. It reads them again when a build file changes, or on `tb refresh`.
+- `tb refresh` prints the number of modules and tasks.
 - [README.md](README.md#update) explains how to update tb.
+- `tests/tty.sh` tests tb in a real terminal with the real fzf. GitHub Actions runs it.
+
+### Fixed
+
+- A module that does not have the task made the whole build fail with `Cannot locate tasks that match ':module:task'`. Fixed: the modules screen lists only the modules that have the task. Auto, `tb print` and `tb run` leave the others out, and say `Skipped, no such task there: ...`.
+- The modules screen listed a folder that has no build file. Fixed: it has no tasks, so it is not listed.
+- The first run in a project showed no progress until Gradle was done. Fixed: on a terminal, tb shows the seconds.
+
+### Known issues
+
+- If Gradle can't list the tasks, tb works as in 0.3.0: a module that does not have the task makes the whole build fail.
+- `◆ ALL MODULES` and `task=ALL` write the task with no module in front. Gradle runs it only in the modules that have it.
+- A whole-project task or a fixed-module task ignores `=modules`. Example: `installDebug=:x` runs `:app:installDebug`, with no error.
+- `tb init` asks Gradle every time, even when the tasks are cached. It needs the descriptions, and they are not cached.
+- In `tb init`, the other tasks have no description.
+- `tb init` does not keep the comment lines of the old `.tb`. They are in `.tb.bak`.
 
 ## 0.3.0 (2026-11-12)
 

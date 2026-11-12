@@ -5,8 +5,8 @@
 #   tb          open the menu
 #   tb last     rerun the previous command
 #   tb hist     pick from previously run commands
-#   tb init     write a .tb file in this repo to edit its command list
-#   tb refresh  re-read the module list from Gradle
+#   tb init     pick this project's tasks from Gradle and write them to .tb
+#   tb refresh  re-read the modules and tasks from Gradle
 #   tb help     the commands that don't open anything (print, run, list...), for scripts and AI agents
 set -euo pipefail
 
@@ -47,7 +47,7 @@ esac
 
 # The command list. Each repo can have its own in a .tb file (tb init writes one to start from),
 # otherwise ~/.config/tb/commands, otherwise this default.
-default_commands='# step | label | gradle task | where | auto
+tb_header='# step | label | gradle task | where | auto
 #
 # step   order things run in, whatever order they are ticked in:
 #        1 clean · 2 changes files · 3 checks · 4 tests · 5 build · 6 reports
@@ -61,7 +61,8 @@ default_commands='# step | label | gradle task | where | auto
 #
 # AI agents: use these task names instead of guessing. `tb print detekt testDebugUnitTest=changed` gives the
 # exact command (`tb help` for more). By hand: ./gradlew root tasks as they are, module tasks as
-# :module:task, fixed ones as :app:task; steps 1-2 in their own ./gradlew run before the rest.
+# :module:task, fixed ones as :app:task; steps 1-2 in their own ./gradlew run before the rest.'
+default_commands="$tb_header"'
 3 | Android lint                        | lintDebug                 | module | auto
 4 | Unit tests                          | testDebugUnitTest         | module | auto
 4 | Instrumented tests (needs a device) | connectedDebugAndroidTest | module
@@ -82,12 +83,266 @@ default_commands='# step | label | gradle task | where | auto
 # 2 | Screenshot tests: record          | recordRoborazziDebug      | module
 # 6 | Coverage report                   | koverHtmlReport           | root'
 
-if [ "${1:-}" = init ]; then
+self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+cache_dir="$HOME/.cache/tb"
+cache_base="$cache_dir/$(printf '%s' "$root" | cksum | cut -d' ' -f1)"
+
+# Runs a Gradle call with its output in a file. On a terminal it shows "Reading tasks from Gradle… 4s" while it waits.
+gradle_wait() { # message outfile command...
+  local msg=$1 out=$2 pid rc=0 start=$SECONDS; shift 2
+  if [ ! -t 2 ]; then echo "$msg..." >&2; "$@" > "$out" 2>/dev/null < /dev/null || rc=$?; return $rc; fi
+  "$@" > "$out" 2>/dev/null < /dev/null &
+  pid=$!
+  # A background job ignores Ctrl-C, so stop it here
+  trap 'kill $pid 2>/dev/null; printf "\r\033[K" >&2; exit 130' INT TERM
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r\033[K%s… %ds' "$msg" $((SECONDS - start)) >&2
+    sleep 0.2
+  done
+  wait "$pid" || rc=$?
+  trap - INT TERM
+  printf '\r\033[K' >&2
+  return $rc
+}
+
+# Modules come from Gradle itself (includes modules registered by code), cached until the settings change. Sets all_modules.
+load_modules() {
+  local key cache="$cache_base.modules" out
+  mkdir -p "$cache_dir"
+  key=$(cat settings.gradle* 2>/dev/null | cksum | cut -d' ' -f1)
+  if [ "${1:-}" != refresh ] && [ -f "$cache" ] && [ "$(head -1 "$cache")" = "$key" ]; then all_modules=$(sed 1d "$cache"); return; fi
+  out=$(mktemp "${TMPDIR:-/tmp}/tb.XXXXXX")
+  gradle_wait "Reading the module list from Gradle (only after settings change)" "$out" ./gradlew -q projects || true
+  all_modules=$(sed -nE "s/.*Project '(:[^']+)'.*/\1/p" "$out" | awk '!seen[$0]++')
+  rm -f "$out"
+  if [ -z "$all_modules" ]; then # Gradle failed: fall back to the include lines
+    all_modules=$(sed -nE "s/^[[:space:]]*include[[:space:]]*\(?[\"']([^\"']+)[\"'].*/\1/p" settings.gradle* | awk '!seen[$0]++')
+  else
+    printf '%s\n%s\n' "$key" "$all_modules" > "$cache"
+  fi
+}
+
+# Every task of every module, from Gradle: "module task" lines (":" is the root project), cached in
+# $tasks_cache until a build file or the settings change. A failed read is cached too (no lines), and
+# then tb works without it. tb refresh reads it again.
+tasks_cache="$cache_base.tasks"
+tasks_checked="" tasks_file="" scan_info=""
+build_key() {
+  { printf '%s\n' settings.gradle settings.gradle.kts build.gradle build.gradle.kts gradle.properties gradle/*.toml
+    printf '%s\n' "$all_modules" | awk 'NF { d = substr($0, 2); gsub(":", "/", d); print d "/build.gradle"; print d "/build.gradle.kts" }'
+    find buildSrc build-logic -type f -not -path '*/build/*' -not -path '*/.gradle/*' 2>/dev/null || true
+  } | tr '\n' '\0' | { xargs -0 cat 2>/dev/null || true; } | cksum | cut -d' ' -f1
+}
+scan_script() {
+  cat <<'EOF'
+// tb: prints every task of every project, and the group and description of the tasks named in -Dtb.info
+gradle.projectsEvaluated {
+  def info = (System.getProperty('tb.info') ?: '').split(',').findAll { it } as Set
+  def done = [] as Set
+  rootProject.allprojects.each { p ->
+    try {
+      p.tasks.names.toList().each { n ->
+        println "TBTASK ${p.path} ${n}"
+        if (n in info && !(n in done)) {
+          try {
+            def t = p.tasks.named(n).get()
+            println "TBINFO|${n}|${t.group ?: ''}|${(t.description ?: '').replaceAll(/[\r\n\t|]+/, ' ')}"
+            done << n
+          } catch (Throwable e) { }
+        }
+      }
+    } catch (Throwable e) { }
+  }
+}
+EOF
+}
+scan_tasks() { # [task names to get the group and description of, comma separated: into $scan_info]
+  local dir key
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/tb.XXXXXX")
+  scan_script > "$dir/scan.gradle"
+  key=$(build_key)
+  gradle_wait "Reading tasks from Gradle" "$dir/out" ./gradlew -q help --init-script "$dir/scan.gradle" \
+    -Dorg.gradle.configureondemand=false ${1:+"-Dtb.info=$1"} || true
+  mkdir -p "$cache_dir"
+  { echo "$key"; awk '$1 == "TBTASK" && NF == 3 { print $2, $3 }' "$dir/out"; } > "$tasks_cache"
+  scan_info=$(grep '^TBINFO|' "$dir/out" || true)
+  rm -rf "$dir"
+  tasks_checked=1 tasks_file=""
+  [ "$(wc -l < "$tasks_cache")" -le 1 ] || tasks_file=$tasks_cache
+}
+ensure_tasks() { # sets tasks_file, empty when there is no task list
+  [ -z "$tasks_checked" ] || return 0
+  tasks_checked=1
+  [ -n "$gradle" ] || return 0
+  if [ ! -f "$tasks_cache" ] || [ "$(head -1 "$tasks_cache")" != "$(build_key)" ]; then scan_tasks; return; fi
+  [ "$(wc -l < "$tasks_cache")" -le 1 ] || tasks_file=$tasks_cache
+}
+
+# fzf 0.46 is the first with everything tb uses (FZF_SELECT_COUNT for ticking in place)
+need_fzf() {
+  command -v fzf >/dev/null || { echo "tb needs fzf 0.46 or newer. Install it with install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+  local v; v=$(fzf --version | awk '{ print $1 }')
+  awk -v v="$v" 'BEGIN { split(v, x, "."); exit !(x[1] > 0 || x[2] >= 46) }' \
+    || { echo "tb needs fzf 0.46 or newer, this is $v. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+}
+
+# --- tb init
+init_defaults() {
   [ -e .tb ] && { echo "$root/.tb already exists"; exit 1; }
   printf '%s\n' "$default_commands" > .tb
   echo "Wrote $root/.tb. Edit it to match this project's tasks."
   exit 0
-fi
+}
+
+# Tasks run with ./gradlew, from the shell history and tb's own history for this repo: "task <TAB> times"
+history_counts() {
+  { for f in "$HOME/.zsh_history" "$HOME/.bash_history"; do [ -f "$f" ] && LC_ALL=C grep -a 'gradlew' "$f"; done
+    awk -F'\t' -v r="$root" '$1 == r { print $2 }' "$history_file"
+  } 2>/dev/null | LC_ALL=C grep -aoE 'gradlew[^|;&]*' | LC_ALL=C awk '
+    { for (i = 2; i <= NF; i++) { t = $i
+        if (t ~ /^(-x|--exclude-task|--tests|-p|--project-dir|-c|--settings-file|-g|--gradle-user-home|-I|--init-script|-b|--build-file)$/) { i++; continue }
+        if (t ~ /^-/) continue
+        sub(/^.*:/, "", t)
+        if (t ~ /^[A-Za-z][A-Za-z0-9_-]*$/) n[t]++ } }
+    END { for (t in n) print t "\t" n[t] }' || true
+}
+
+# One row per task: task, rank (1 history, 2 in .tb or a known tool, 3 the rest), times run, label, where,
+# step, auto, description. Rows in $TB_INIT/rows, ticks in $TB_INIT/state (task, ticked, auto).
+init_build_rows() {
+  local d=$TB_INIT
+  history_counts > "$d/hist"
+  # the known tools: the rows of the default list, commented or not
+  printf '%s\n' "$default_commands" | sed -nE 's/^#? *([0-9] *\|.*)/\1/p' \
+    | awk -F'|' '{ for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i); print $1 "\t" $2 "\t" $3 "\t" $5 }' > "$d/known"
+  : > "$d/old"
+  [ ! -f .tb ] || awk -F'|' '/^[[:space:]]*(#|$)/ || /^[[:space:]]*runner:/ || NF < 4 { next }
+    { for (i = 1; i <= NF; i++) gsub(/^[[:space:]]+|[[:space:]]+$/, "", $i); print $1 "\t" $2 "\t" $3 "\t" $5 "\t" $4 }' .tb > "$d/old"
+  scan_tasks "$( { cut -f1 "$d/hist"; cut -f3 "$d/known" "$d/old"; } | sort -u | tr '\n' ',' | sed 's/,$//')"
+  [ -n "$tasks_file" ] || return 1
+  printf '%s\n' "$scan_info" | awk -F'|' 'NF >= 3 { print $2 "\t" $3 "\t" $4 }' > "$d/info"
+  awk -F'\t' -v tf="$tasks_file" -v hf="$d/hist" -v kf="$d/known" -v of="$d/old" -v inf="$d/info" -v sf="$d/state" -v hasold="$([ -s "$d/old" ] && echo 1)" '
+    function stepof(t, g,   lt, lg) {
+      lt = tolower(t); lg = tolower(g)
+      if (t == "clean") return 1
+      if (lt ~ /^record/ || lg == "formatting" || lt ~ /format|spotlessapply/) return 2
+      if (lt ~ /report|coverage|jacoco|kover/ || lg == "reporting" || lg == "documentation") return 6
+      if (lg == "verification") return (lt ~ /test|paparazzi|roborazzi|screenshot/) ? 4 : 3
+      if (lt ~ /test/) return 4
+      if (lt ~ /lint|detekt|check/) return 3
+      return 5
+    }
+    FILENAME == tf { if (FNR == 1) next; split($0, p, " "); m = p[1]; t = p[2]
+      if (!(t in seen)) { seen[t] = 1; names[++n] = t }
+      if (m == ":") root[t] = 1; else if (!((m, t) in mt)) { mt[m, t] = 1; nm[t]++; one[t] = m }
+      next }
+    FILENAME == hf { ran[$1] = $2; next }
+    FILENAME == kf { if (!($3 in kstep)) { kstep[$3] = $1; klabel[$3] = $2; kauto[$3] = ($4 == "auto"); korder[$3] = ++nk }; next }
+    FILENAME == of { if (!($3 in ostep)) { ostep[$3] = $1; olabel[$3] = $2; oauto[$3] = ($4 == "auto"); owhere[$3] = $5; oorder[$3] = ++no }; next }
+    FILENAME == inf { group[$1] = $2; desc[$1] = $3; next }
+    END {
+      for (i = 1; i <= n; i++) { t = names[i]
+        if (t in ran) { rank = 1; key = 1000000 - ran[t] }
+        else if (t in ostep) { rank = 2; key = oorder[t] }
+        else if (t in kstep) { rank = 2; key = 1000 + korder[t] }
+        else { rank = 3; key = 0 }
+        where = root[t] ? "root" : (nm[t] == 1 ? one[t] : "module")
+        step = stepof(t, group[t]); label = t
+        if (t in kstep) { step = kstep[t]; label = klabel[t] }
+        auto = (step == 3 || step == 4) && t !~ /^connected/
+        if (t in kstep) auto = kauto[t]
+        if (t in ostep) { step = ostep[t]; label = olabel[t]; where = owhere[t]; auto = oauto[t] }
+        tick = hasold ? (t in ostep) : (rank <= 2)
+        printf "%d\t%09d\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%d\t%s\n", rank, key, t, t, rank, ran[t] + 0, label, where, step, auto, desc[t]
+        printf "%s\t%d\t%d\n", t, tick, auto > sf
+      } }' "$tasks_file" "$d/hist" "$d/known" "$d/old" "$d/info" \
+    | sort -t "$(printf '\t')" -k1,1n -k2,2n -k3,3 | cut -f4- > "$d/rows"
+}
+
+# The list as fzf shows it: "display <TAB> task". The other tasks (rank 3) only show while searching, or when ticked.
+init_rows() { # query
+  awk -F'\t' -v q="$1" 'NR == FNR { tick[$1] = $2; auto[$1] = $3; next }
+    { t = $1; if ($2 == 3 && q == "" && !tick[t]) next
+      printf "%s %s %s  %-36s %-30s %-9s %s\t%s\n", (tick[t] ? "[x]" : "[ ]"), (tick[t] && auto[t] ? "auto" : "    "),
+        ($3 > 0 ? sprintf("★%-3d", $3) : "    "), $4, t, $5, $8, t }' "$TB_INIT/state" "$TB_INIT/rows"
+}
+init_pos() { # rows query task -> its line in the list fzf shows for that query, 0 if not there
+  local list=$1
+  [ -z "$2" ] || list=$(printf '%s\n' "$1" | fzf --filter="$2" --delimiter='\t' --with-nth=1 --ansi || true)
+  printf '%s\n' "$list" | awk -F'\t' -v t="$3" '$2 == t { n = NR; exit } END { print n + 0 }'
+}
+init_header() {
+  local all; all=$(wc -l < "$TB_INIT/rows" | tr -d ' ')
+  printf '%s\n' "Tick the tasks to keep in .tb · ★ ran from your shell history (times) · auto = ★ Auto runs it"
+  printf '%s\n' "TAB tick · CTRL-T auto on/off · type to search all $all tasks · ENTER write .tb · ESC quit"
+  [ ! -s "$TB_INIT/old" ] || printf '%s\n' "Ticked: the tasks in your .tb. ENTER saves the old one as .tb.bak and keeps its other lines."
+  printf '%-15s%-37s%-31s%-10s%s' "" label task where "what it does"
+}
+
+# Writes .tb: the comments, the runner and other lines of the old .tb that are not in the list, then the ticked tasks by step
+init_write() {
+  local d=$TB_INIT had=""
+  [ ! -f .tb ] || { had=1; cp .tb .tb.bak; }
+  {
+    printf '%s\n' "$tb_header"
+    [ -z "$had" ] || awk -F'|' 'NR == FNR { split($0, r, "\t"); listed[r[1]] = 1; next }
+      /^[[:space:]]*(#|$)/ { next }
+      { t = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", t); if (NF >= 4 && (t in listed)) next; print }' "$d/rows" .tb.bak
+    awk -F'\t' 'NR == FNR { if ($2) { tick[$1] = 1; auto[$1] = $3 }; next }
+      ($1 in tick) { n++; t[n] = $1; l[n] = $4; w[n] = $5; s[n] = $6; a[n] = auto[$1]
+        if (length($4) > lw) lw = length($4); if (length($1) > tw) tw = length($1); if (length($5) > ww) ww = length($5) }
+      END { for (k = 1; k <= 7; k++) for (i = 1; i <= n; i++) if (s[i] + 0 == k || (k == 7 && (s[i] + 0 < 1 || s[i] + 0 > 6)))
+              printf "%s | %-" lw "s | %-" tw "s | %s\n", s[i], l[i], t[i], (a[i] ? sprintf("%-" ww "s | auto", w[i]) : w[i]) }' "$d/state" "$d/rows"
+  } > .tb.new
+  mv .tb.new .tb
+}
+
+init_interactive() {
+  need_fzf
+  load_modules
+  TB_INIT=$(mktemp -d "${TMPDIR:-/tmp}/tb.XXXXXX"); export TB_INIT
+  trap 'rm -rf "$TB_INIT"' EXIT
+  if ! init_build_rows; then
+    echo "Could not read the tasks from Gradle."
+    [ ! -e .tb ] || { echo "$root/.tb is unchanged."; exit 1; }
+    echo "Writing the fixed list instead."; init_defaults
+  fi
+  : > "$TB_INIT/query"
+  local rc=0
+  init_rows "" | pick --prompt="tasks > " --delimiter='\t' --with-nth=1 --header="$(init_header)" \
+    --bind="tab:transform($self __init_key tick {2} {q})" --bind="ctrl-t:transform($self __init_key auto {2} {q})" \
+    --bind="change:transform($self __init_change {q})" > /dev/null || rc=$?
+  [ "$rc" -le 1 ] || { echo "Nothing written."; exit 0; }   # ESC (fzf exits 1 when ENTER is pressed on no rows)
+  local n; n=$(awk -F'\t' '$2 { n++ } END { print n + 0 }' "$TB_INIT/state")
+  [ "$n" -gt 0 ] || { echo "Nothing ticked, nothing written."; exit 0; }
+  local had=""; [ -f .tb ] && had=1
+  init_write
+  if [ -n "$had" ]; then echo "Wrote $root/.tb with $n tasks. The old one is in .tb.bak."
+  else echo "Wrote $root/.tb with $n tasks."; fi
+  exit 0
+}
+
+case "${1:-}" in
+  init)
+    if [ "${2:-}" != --defaults ] && [ -n "$gradle" ] && { [ -n "${TB_INTERACTIVE:-}" ] || { [ -t 0 ] && [ -t 1 ]; }; }; then init_interactive; fi
+    init_defaults ;;
+  __init_key) # tick|auto task query: called by fzf on TAB and CTRL-T
+    [ -n "${3:-}" ] || exit 0
+    before=$(init_rows "${4:-}"); old_pos=$(init_pos "$before" "${4:-}" "$3")
+    awk -F'\t' -v OFS='\t' -v k="$2" -v t="$3" '$1 == t { if (k == "tick") $2 = !$2; else { $3 = !($2 && $3); $2 = 1 } } 1' \
+      "$TB_INIT/state" > "$TB_INIT/state.new" && mv "$TB_INIT/state.new" "$TB_INIT/state"
+    after=$(init_rows "${4:-}"); p=$(init_pos "$after" "${4:-}" "$3")
+    total=$(printf '%s\n' "$after" | sed '/^$/d' | wc -l | tr -d ' ')
+    if [ "$p" -eq 0 ]; then p=$old_pos; elif [ "$2" = tick ]; then p=$((p + 1)); fi
+    [ "$p" -le "$total" ] || p=$total
+    echo "reload-sync($self __init_rows {q})+pos($p)"
+    exit 0 ;;
+  __init_change) # query: the other tasks show while searching
+    shown=$(cat "$TB_INIT/query"); now=""; [ -z "${2:-}" ] || now=1
+    [ "$shown" = "$now" ] || { printf '%s' "$now" > "$TB_INIT/query"; echo "reload-sync($self __init_rows {q})"; }
+    exit 0 ;;
+  __init_rows) init_rows "${2:-}"; exit 0 ;;
+esac
 
 config="$root/.tb"; [ -f "$config" ] || config="$HOME/.config/tb/commands"
 if [ -f "$config" ]; then command_source=$(cat "$config"); else command_source=$default_commands; fi
@@ -106,29 +361,13 @@ commands=$(printf '%s\n' "$command_source" | awk -F'|' -v gradle="$gradle" '
     printf "%s\t%s\t%s\t%s\t%s\n", $2, $3, $4, $1, $5 }')
 [ -n "$commands" ] || { echo "No commands in $config"; exit 1; }
 
-# Modules come from Gradle itself (includes modules registered by code), cached until the settings change
-load_modules() {
-  local cache_dir="$HOME/.cache/tb" key cache
-  mkdir -p "$cache_dir"
-  cache="$cache_dir/$(printf '%s' "$root" | cksum | cut -d' ' -f1).modules"
-  key=$(cat settings.gradle* 2>/dev/null | cksum | cut -d' ' -f1)
-  if [ "${1:-}" != refresh ] && [ -f "$cache" ] && [ "$(head -1 "$cache")" = "$key" ]; then sed 1d "$cache"; return; fi
-  echo "Reading the module list from Gradle (only after settings change)..." >&2
-  local mods
-  mods=$(./gradlew -q projects 2>/dev/null | sed -nE "s/.*Project '(:[^']+)'.*/\1/p" | awk '!seen[$0]++' || true)
-  if [ -z "$mods" ]; then # Gradle failed: fall back to the include lines
-    mods=$(sed -nE "s/^[[:space:]]*include[[:space:]]*\(?[\"']([^\"']+)[\"'].*/\1/p" settings.gradle* | awk '!seen[$0]++')
-  else
-    printf '%s\n%s\n' "$key" "$mods" > "$cache"
-  fi
-  printf '%s\n' "$mods"
-}
 case "${1:-}" in help|-h|--help|agents) no_modules=1 ;; *) no_modules="${GB_STATE:-}" ;; esac
 if [ -n "$no_modules" ] || [ -z "$gradle" ]; then all_modules=""   # help and callbacks from inside fzf don't need it
-else all_modules=$(load_modules "${1:-}"); fi
+else load_modules "${1:-}"; fi
 if [ "${1:-}" = refresh ]; then
   [ -n "$gradle" ] || { echo "No ./gradlew here, so no modules to read"; exit 0; }
-  echo "$(printf '%s\n' "$all_modules" | wc -l | tr -d ' ') modules"; exit 0
+  scan_tasks
+  echo "$(printf '%s\n' "$all_modules" | wc -l | tr -d ' ') modules, $(sed 1d "$tasks_cache" | awk '!seen[$2]++' | wc -l | tr -d ' ') tasks"; exit 0
 fi
 
 # Modules touched on this branch (vs main): each changed file belongs to the deepest module containing it
@@ -250,6 +489,19 @@ summary() { # lines -> "a, b, c" (first few)
 # The list: one line per added command.
 #   task <TAB> label <TAB> scope <TAB> modules ("ALL" or space separated) <TAB> tests ("module|Class|pap" space separated, empty = all)
 jobs=""
+skipped=""   # "module:task" pairs left out because the module has no such task
+
+# The modules (space separated) that have the task. All of them when there is no task list from Gradle.
+with_task() { # task "modules"
+  [ -n "$tasks_file" ] || { printf '%s' "$2"; return; }
+  awk -v t="$1" 'NR == FNR { if (FNR > 1 && $2 == t) has[$1] = 1; next } ($0 in has)' "$tasks_file" <(printf '%s\n' $2) \
+    | tr '\n' ' ' | sed 's/ $//'
+}
+note_skipped() { # task "modules" "modules kept"
+  local m
+  for m in $2; do case " $3 " in *" $m "*) ;; *) skipped="$skipped $m:$1" ;; esac; done
+}
+skipped_note() { printf 'Skipped, no such task there: %s' "$(printf '%s\n' $skipped | awk '!seen[$0]++' | summary 3)"; }
 
 job_field() { printf '%s\n' "$jobs" | awk -F'\t' -v t="$1" -v n="$2" '$1==t{print $n}'; }
 has_job() { awk -F'\t' -v t="$1" '$1==t { f=1 } END { exit !f }' <<< "$jobs"; }
@@ -368,9 +620,21 @@ edit_commands() {
   [ -n "$mtasks" ] || return 0
 
   local labels; labels=$(printf '%s\n' "$mtasks" | cut -f2 | summary 3)
+  ensure_tasks
   # Start with the modules these commands already have, so opening one again just adds more
   local existing; existing=$(printf '%s\n' "$mtasks" | cut -f1 | while read -r t; do job_field "$t" 4 | tr ' ' '\n'; done | sed '/^$/d' | awk '!seen[$0]++')
   rows=$module_rows
+  if [ -n "$tasks_file" ]; then # only the modules that have one of these tasks
+    local have n
+    have=$(awk 'NR == FNR { if (NF) want[$1] = 1; next } FNR > 1 && ($2 in want) && !seen[$1]++ { print $1 }' \
+      <(printf '%s\n' "$mtasks" | cut -f1) "$tasks_file")
+    n=$(awk 'NR == FNR { h[$0] = 1; next } ($0 in h) { n++ } END { print n + 0 }' <(printf '%s\n' "$have") <(printf '%s\n' "$affected"))
+    rows=$(printf '%s\n' "$module_rows" | awk -v arow="◆ CHANGED AND DEPENDENT MODULES ($n)" -v n="$n" '
+      NR == FNR { h[$0] = 1; next }
+      /^◆ ALL MODULES/ { print; next }
+      /^◆ / { if (n > 0) print arow; next }
+      { m = $0; sub(/^(★|☆) /, "", m); if (m in h) print }' <(printf '%s\n' "$have") -)
+  fi
   local any_added=""
   while read -r t; do has_job "$t" && any_added=1; done <<< "$(printf '%s\n' "$mtasks" | cut -f1)"
   [ -n "$any_added" ] && rows=$(printf '✖ Remove %s from the list\n%s' "$labels" "$rows")
@@ -389,8 +653,8 @@ edit_commands() {
     return 0
   fi
   if grep -q "ALL MODULES" <<< "$out"; then mods=ALL
-  else mods=$( { grep -qF "$affected_row" <<< "$out" && printf '%s\n' "$affected"
-      grep -vF "$affected_row" <<< "$out" | sed 's/^[★☆] //' || true; } | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'); fi
+  else mods=$( { grep -q '^◆ CHANGED AND DEPENDENT' <<< "$out" && printf '%s\n' "$affected"
+      grep -v '^◆ CHANGED AND DEPENDENT' <<< "$out" | sed 's/^[★☆] //' || true; } | sed '/^$/d' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//'); fi
 
   # Test classes, for test commands (skipped for ALL MODULES: too many to list)
   tests=$(printf '%s\n' "$mtasks" | cut -f1 | while read -r t; do job_field "$t" 5 | tr ' ' '\n'; done | sed '/^$/d' | awk '!seen[$0]++')
@@ -408,13 +672,19 @@ TAB tick · CTRL-A tick all shown · ★ changed · 📸 screenshot · ENTER don
     fi
   fi
 
+  local tm
   while IFS=$'\t' read -r task label scope; do
     local own=""
-    if [ "$mods" != ALL ] && is_test_task "$task"; then
-      # keep only tests that belong to this command's modules
-      own=$(printf '%s\n' "$tests" | awk -F'|' 'NR==FNR{ok[$0]=1; next} NF && ($1 in ok)' <(printf '%s\n' $mods) - | tr '\n' ' ' | sed 's/ $//')
+    tm=$mods
+    if [ "$mods" != ALL ]; then
+      tm=$(with_task "$task" "$mods"); note_skipped "$task" "$mods" "$tm"
+      [ -n "$tm" ] || { remove_job "$task"; continue; }
     fi
-    set_job "$task" "$label" "$scope" "$mods" "$own"
+    if [ "$tm" != ALL ] && is_test_task "$task"; then
+      # keep only tests that belong to this command's modules
+      own=$(printf '%s\n' "$tests" | awk -F'|' 'NR==FNR{ok[$0]=1; next} NF && ($1 in ok)' <(printf '%s\n' $tm) - | tr '\n' ' ' | sed 's/ $//')
+    fi
+    set_job "$task" "$label" "$scope" "$tm" "$own"
   done <<< "$mtasks"
 }
 
@@ -435,11 +705,13 @@ add_modules() { # task label "modules" (space separated, or ALL)
 # The usual CI checks, on the modules changed on this branch and the modules that depend on them (without Gradle: just the auto commands)
 auto_changed() {
   [ -n "$changed" ] || [ -z "$gradle" ] || { notice="⚠ No changed modules found on this branch"; return; }
-  local mods; mods=$(printf '%s\n' "$affected" | tr '\n' ' ' | sed 's/ $//')
+  local mods tm; mods=$(printf '%s\n' "$affected" | tr '\n' ' ' | sed 's/ $//')
+  ensure_tasks
   while IFS=$'\t' read -r label task scope _ auto; do
     [ "$auto" = auto ] || continue
     [ "$scope" = module ] || { set_job "$task" "$label" "$scope" "" ""; continue; }
-    add_modules "$task" "$label" "$mods"
+    tm=$(with_task "$task" "$mods"); note_skipped "$task" "$mods" "$tm"
+    [ -z "$tm" ] || add_modules "$task" "$label" "$tm"
   done <<< "$commands"
   notice="★ Added the auto checks"
   [ -z "$gradle" ] || notice="$notice; module ones on $(printf '%s\n' "$affected" | summary 3)"
@@ -506,8 +778,8 @@ Runner: $gradle_prefix
   tb history         commands run here before, newest last
   tb last            rerun the last command
   tb hist            pick a command run before and rerun it
-  tb init            write .tb here to edit the command list
-  tb refresh         re-read the modules from Gradle
+  tb init            pick this project's tasks and write .tb (--defaults: the fixed list)
+  tb refresh         re-read the modules and tasks from Gradle
   tb agents          a note to paste into AGENTS.md / CLAUDE.md
   tb help            this text
 
@@ -572,6 +844,11 @@ jobs_from_specs() {
         done
         mods=${fixed# } ;;
     esac
+    if [ "$mods" != ALL ] && [ -n "$gradle" ]; then
+      ensure_tasks
+      fixed=$(with_task "$task" "$mods"); note_skipped "$task" "$mods" "$fixed"; mods=$fixed
+      [ -n "$mods" ] || continue
+    fi
     if has_job "$task"; then add_modules "$task" "$(cut -f1 <<< "$line")" "${mods:-ALL}"   # the same task twice: both sets of modules
     else set_job "$task" "$(cut -f1 <<< "$line")" module "${mods:-ALL}" ""; fi
   done
@@ -597,6 +874,7 @@ case "${1:-}" in
     notice=""
     jobs_from_specs "$@" || exit 1
     case "$notice" in ⚠*) echo "$notice" >&2 ;; esac
+    [ -z "$skipped" ] || { skipped_note; echo; } >&2
     cmd=$(printf '%s\n' "$jobs" | full_command || true)
     [ -n "$cmd" ] || exit 1
     if [ "$mode" = print ]; then printf '%s\n' "$cmd"; else run "$cmd"; fi
@@ -641,7 +919,6 @@ row_index() { # kind value -> line number of that row in the menu, 1 if gone
 
 # Callbacks fzf runs while the menu stays open. ENTER on a command without modules ticks it in place,
 # so the list doesn't blink and the cursor stays on it; anything else closes the menu as usual.
-self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 case "${1:-}" in
   __enter)
     kind=$2 task=$3 scope=${4:-}
@@ -656,11 +933,7 @@ case "${1:-}" in
   __header) jobs=$(cat "$GB_STATE"); notice=""; menu_header; exit 0 ;;
 esac
 
-# fzf 0.46 is the first with everything the menu uses (FZF_SELECT_COUNT for ticking in place)
-command -v fzf >/dev/null || { echo "tb needs fzf 0.46 or newer. Install it with install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
-fzf_version=$(fzf --version | awk '{ print $1 }')
-awk -v v="$fzf_version" 'BEGIN { split(v, x, "."); exit !(x[1] > 0 || x[2] >= 46) }' \
-  || { echo "tb needs fzf 0.46 or newer, this is $fzf_version. Run install.sh, or: https://github.com/junegunn/fzf#installation"; exit 1; }
+need_fzf
 state=$(mktemp "${TMPDIR:-/tmp}/tb.XXXXXX")
 trap 'rm -f "$state"' EXIT
 export GB_STATE=$state GB_CHANGED=$changed GB_AFFECTED=$affected
@@ -707,7 +980,8 @@ while true; do
         notice="💾 $verb preset \"$name\". It's at the top of the list now."
         focus_kind=preset focus_value="$preset_dir/$name"
       fi ;;
-    auto) auto_changed ;;
-    *) edit_commands "$(printf '%s\n' "$picked" | awk -F'\t' '$2=="cmd"{print $3 "\t" $4 "\t" $5}')" ;;
+    auto) skipped=""; auto_changed ;;
+    *) skipped=""; edit_commands "$(printf '%s\n' "$picked" | awk -F'\t' '$2=="cmd"{print $3 "\t" $4 "\t" $5}')" ;;
   esac
+  [ -z "$skipped" ] || { notice="${notice:+$notice · }⚠ $(skipped_note)"; skipped=""; }
 done

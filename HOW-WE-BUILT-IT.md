@@ -50,7 +50,7 @@ Each line is something the author asked for, and what was built for it. Quotes a
 - `.tb`, in the project root: the project's own task list. Without it, tb uses `~/.config/tb/commands`, then a built-in Android list.
 - `~/.config/tb/presets/<project folder>/`: presets.
 - `~/.tb_history`: the commands tb ran.
-- `~/.cache/tb/`: the module list.
+- `~/.cache/tb/`: the module list, and the tasks of each module.
 
 ## What we changed on the way
 
@@ -62,6 +62,8 @@ Each line is something the author asked for, and what was built for it. Quotes a
 - **Affected modules.** At first, Auto ran only on the changed modules. The author asked "is there anything like this tool out there?" The search found Gradle plugins that also find the modules that depend on the changed ones. The author then asked: "check the modules that depend on that module for the auto". So Auto now also finds the modules that depend on the changed modules, and runs there too.
 - **Review.** "I want some sub-agents to scrutinize the readme." AI agents checked the README against the code.
 - **Field test.** A field test found seven bugs. They are fixed in 0.3.0. [CHANGELOG.md](CHANGELOG.md) lists them, and the known issues that are not fixed yet.
+- **tb init reads the project.** Up to 0.3.0, `tb init` wrote the same list in every project. In 0.4.0 it asks Gradle for every task with an init script, and offers the tasks from the shell history and the common Android tasks first. The same task list fixes a known issue: tb knows which modules have a task.
+- **Real terminal.** The author asked that `tb init` be tested "in a REAL terminal with REAL fzf, not only with fake fzf". `tests/tty.sh` runs tb in tmux with the real fzf. On the real terminal, a search in `tb init` kept the rows in list order, so the best match was not on top. Fixed before the release: fzf sorts the search results.
 
 ## Other people's code
 
@@ -171,7 +173,7 @@ Develocity has nothing about affected modules or picking tasks. It works at the 
 - tb has no cache. Nx, Turborepo and moon skip tasks whose inputs did not change.
 - tb picks whole modules. Develocity Predictive Test Selection, affected-tests and NGM TestRunner pick only the tests linked to the change.
 - tb has no file watching and no pre-commit hook setup. fnug has both.
-- tb does not check that a module has a task before it puts the task in the command. See [Known issues](MANUAL.md#known-issues).
+- tb checks that a module has a task only when Gradle could list the tasks. See [Known issues](MANUAL.md#known-issues).
 
 ## References
 
@@ -180,12 +182,13 @@ The official docs for each tool tb uses.
 | Tool | What tb uses it for | Reference |
 |---|---|---|
 | fzf | The menu: `--multi`, `--expect`, `--header-first`, `--with-nth`, `--delimiter`, `--print-query`, `--bind`. `FZF_SELECT_COUNT` is why tb needs fzf 0.46. | [fzf](https://github.com/junegunn/fzf), [fzf docs](https://junegunn.github.io/fzf/) |
-| Gradle | `--continue`, `--parallel`, `--console=rich`, `-q projects`. | [Gradle command-line interface](https://docs.gradle.org/current/userguide/command_line_interface.html) |
+| Gradle | `--continue`, `--parallel`, `--console=rich`, `-q projects`, `--init-script` to list every task. | [Gradle command-line interface](https://docs.gradle.org/current/userguide/command_line_interface.html) |
 | Gradle | `--tests`: run the picked test classes. | [Gradle test filtering](https://docs.gradle.org/current/userguide/java_testing.html#test_filtering) |
 | git | Changed files on the branch: `git merge-base`, `git diff --name-only`. | [git diff](https://git-scm.com/docs/git-diff), [git merge-base](https://git-scm.com/docs/git-merge-base) |
 | git | New files not committed yet: `git ls-files --others`. | [git ls-files](https://git-scm.com/docs/git-ls-files) |
 | bash | The script. | [Bash Reference Manual](https://www.gnu.org/software/bash/manual/) |
 | Paparazzi | Screenshot test classes. | [Paparazzi](https://github.com/cashapp/paparazzi) |
+| tmux | `tests/tty.sh`: runs tb in a real terminal and reads the screen. | [tmux](https://github.com/tmux/tmux/wiki) |
 | vhs | The GIF. | [vhs](https://github.com/charmbracelet/vhs) |
 | Homebrew | The `brew install` formula. | [Formula Cookbook](https://docs.brew.sh/Formula-Cookbook), [How to Create and Maintain a Tap](https://docs.brew.sh/How-to-Create-and-Maintain-a-Tap) |
 | GitHub Actions | The tests on every push. | [Workflow syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax) |

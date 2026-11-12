@@ -8,6 +8,7 @@
 | `install.sh` | The installer. |
 | `tests/run.sh` | The tests. |
 | `tests/fake-fzf` | Stands in for fzf in the tests. It reads scripted key presses. |
+| `tests/tty.sh` | The tests in a real terminal, with the real fzf. |
 | `example/.tb` | The full example task list. A test checks it. |
 | `demo/make-project.sh` | Makes the demo project. |
 | `demo/demo.tape` | Records `demo/demo.gif` with [vhs](https://github.com/charmbracelet/vhs). |
@@ -23,6 +24,17 @@ tests/run.sh
 - They need no Gradle, no Android SDK and no terminal.
 - GitHub Actions runs them on Linux and macOS on every push.
 - GitHub Actions also runs `install.sh` on a clean Linux machine.
+
+```sh
+tests/tty.sh
+FZF=/path/to/fzf tests/tty.sh
+```
+
+- These run tb in a real terminal: tmux runs it with the real fzf in the demo project.
+- They send key presses and check the screen and the files tb writes.
+- They need tmux and fzf 0.46 or newer. `FZF=` picks another fzf.
+- The last line must say `0 failed`.
+- GitHub Actions runs them with fzf 0.46.0 on Linux and the newest fzf on macOS.
 
 ## The demo GIF
 

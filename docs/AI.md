@@ -48,7 +48,7 @@ SPEC is one of:
 - A module task needs `=`. `tb print testDebugUnitTest` is an error.
 - A task that is not in the task list goes to the build as it is, last.
 - The same module task twice runs on both sets of modules: `lintDebug=:a lintDebug=:b` is `lintDebug=:a,:b`.
-- A module that does not have the task makes the whole build fail. Use `=ALL` for a task that only some modules have. See [Known issues](../MANUAL.md#known-issues).
+- A module that does not have the task is left out, with a note on stderr: `Skipped, no such task there: ...`.
 - A whole-project or fixed-module task ignores `=modules`.
 - An error exits with 1 and says what is wrong.
 
@@ -72,14 +72,14 @@ Use the runner from `tb list` (default `./gradlew`). Whole-project tasks go as t
 
 ## Set up .tb for a project
 
-`tb init` writes a starting task list for Android. It is the same list in every project. It does not read the project's tasks. You must edit `.tb` to match the project.
+`tb init` on a terminal opens a list for a person to tick. Without a terminal, `tb init` writes the built-in task list for Android, the same as `tb init --defaults`. It is the same list in every project. You must edit `.tb` to match the project.
 
 1. Find the build tasks the project uses:
    - the user's shell history (`~/.zsh_history`, `~/.bash_history`): `./gradlew` lines run in this project
    - CI workflow files (`.github/workflows`, `.gitlab-ci.yml`, `bitrise.yml` and similar)
    - build scripts and the plugins they apply (Detekt, Ktlint, Spotless, Paparazzi, Kover...)
    - README and CONTRIBUTING
-2. Run `tb init`. Then rewrite `.tb` with those tasks. The format is in [MANUAL.md](../MANUAL.md#the-tb-file) and in the comments in `.tb`.
+2. Run `tb init --defaults`. Then rewrite `.tb` with those tasks. The format is in [MANUAL.md](../MANUAL.md#the-tb-file) and in the comments in `.tb`.
 3. Mark as `auto` the standard checks someone should run before pushing: lint, static analysis, formatting checks, unit tests.
 4. Don't add tasks the project doesn't have.
 5. Check it with `tb list` and `tb print auto`.
@@ -95,7 +95,7 @@ Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
    - CI workflow files (.github/workflows, .gitlab-ci.yml, bitrise.yml and similar)
    - build scripts and the plugins they apply (Detekt, Ktlint, Spotless, Paparazzi, Kover...)
    - README and CONTRIBUTING
-2. Run `tb init`, then rewrite .tb with those tasks, following the format and comments in it.
+2. Run `tb init --defaults`, then rewrite .tb with those tasks, following the format and comments in it.
    Mark the standard checks someone should run before pushing (lint, static analysis, formatting
    checks, unit tests) as `auto`. Don't add tasks the project doesn't have.
 3. Check it with `tb list` and `tb print auto`.
@@ -110,10 +110,12 @@ Set up tb (https://github.com/cicerohellmann/taskboard) for this project.
 | `install.sh` | The installer. |
 | `tests/run.sh` | The tests. |
 | `tests/fake-fzf` | Stands in for fzf in the tests. |
+| `tests/tty.sh` | The tests in a real terminal (tmux) with the real fzf. |
 | `example/.tb` | The full example task list. A test checks it. |
 | `demo/` | The demo project script and the GIF. |
 
 - Run `tests/run.sh` after every change. The last line must say `0 failed`.
+- When you change a menu or `tb init`, run `tests/tty.sh` too. It needs tmux and fzf.
 - Some tests check the help text. `tb help` must stay 45 lines or less.
 - Write the docs with the words in [docs/WORDS.md](WORDS.md).
 - When you change a row or a key in `tb`, change [MANUAL.md](../MANUAL.md) too.

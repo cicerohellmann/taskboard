@@ -37,7 +37,8 @@ tui() {
   printf '%s\n' "$@" > "$FAKE_FZF_SCRIPT"; : > "$FAKE_FZF_LOG"; : > "$GRADLE_LOG"
   (cd "$REPO" && TB_INTERACTIVE=1 "$TB" < /dev/null)
 }
-gradle_runs() { grep -v '^-q projects$' "$GRADLE_LOG" || true; }
+gradle_runs() { grep -v -e '^-q projects$' -e '--init-script' "$GRADLE_LOG" || true; }
+scans() { grep -c -- '--init-script' "$GRADLE_LOG"; }
 
 # --- the fake project: :app, :lib:a (changed on this branch), :lib:b (screenshot test)
 mkdir -p "$REPO" && cd "$REPO"
@@ -49,6 +50,27 @@ if [ "$*" = "-q projects" ]; then
   [ -z "${GRADLE_FAIL:-}" ] || exit 1
   printf "Root project 'demo'\n+--- Project ':app'\n+--- Project ':lib'\n|    +--- Project ':lib:a'\n|    \\\\--- Project ':lib:b'\n\\\\--- Project ':generated'\n"
 fi
+case "$*" in *--init-script*) # tb reading the tasks: ":lib" is only a folder, it has no tasks of its own
+  [ -z "${GRADLE_FAIL:-}${GRADLE_SCAN_FAIL:-}" ] || exit 1
+  sleep "${GRADLE_SLEEP:-0}"
+  echo "Welcome to Gradle"
+  for t in clean detekt ktlintCheck ktlintFormat koverHtmlReport help; do echo "TBTASK : $t"; done
+  for t in testDebugUnitTest lintDebug assembleDebug installDebug clean; do echo "TBTASK :app $t"; done
+  for t in testDebugUnitTest lintDebug verifyPaparazziDebug recordPaparazziDebug clean; do echo "TBTASK :lib:a $t"; done
+  for t in testDebugUnitTest lintDebug verifyPaparazziDebug recordPaparazziDebug clean; do echo "TBTASK :lib:b $t"; done
+  for t in testDebugUnitTest clean; do echo "TBTASK :generated $t"; done
+  echo "TBTASK :lib clean"
+  info=$(printf '%s\n' "$@" | sed -n 's/^-Dtb.info=//p')
+  for t in $(printf '%s' "$info" | tr ',' ' '); do
+    case "$t" in
+      ktlintFormat) echo "TBINFO|ktlintFormat|Formatting|Fixes Kotlin code style" ;;
+      koverHtmlReport) echo "TBINFO|koverHtmlReport|verification|Writes the coverage report" ;;
+      testDebugUnitTest) echo "TBINFO|testDebugUnitTest|verification|Runs the unit tests" ;;
+      detekt) echo "TBINFO|detekt|verification|Runs detekt" ;;
+      installDebug) echo "TBINFO|installDebug|Install|Installs the Debug build" ;;
+    esac
+  done ;;
+esac
 EOF
 chmod +x gradlew
 printf "include ':app'\ninclude ':lib:a'\ninclude ':lib:b'\n" > settings.gradle
@@ -113,6 +135,37 @@ check "falls back to settings includes when gradle fails" \
   "$(printf ':app\n:lib:a\n:lib:b')" "$(GRADLE_FAIL=1 gb refresh > /dev/null; GRADLE_FAIL=1 gb modules)"
 gb refresh > /dev/null
 check "changed lists modules touched on this branch" ":lib:a" "$(gb changed)"
+
+echo "== tasks from Gradle"
+rm -rf "$HOME/.cache/tb"; : > "$GRADLE_LOG"
+out=$(gb print testDebugUnitTest=:lib,:lib:a 2> "$T/err")
+check "a module without the task is left out" "$P :lib:a:testDebugUnitTest" "$out"
+contains "and a note says which" "$(cat "$T/err")" "Skipped, no such task there: :lib:testDebugUnitTest"
+contains "without a terminal, a plain line says tb is reading the tasks" "$(cat "$T/err")" "Reading tasks from Gradle..."
+lacks "and no counting seconds" "$(cat "$T/err")" "$(printf '\r')"
+check "the task list is read once" "1" "$(scans)"
+gb print testDebugUnitTest=:lib:a > /dev/null 2>&1
+check "then cached" "1" "$(scans)"
+echo "// changed" >> "$REPO/lib/a/build.gradle"
+gb print testDebugUnitTest=:lib:a > /dev/null 2>&1
+check "a changed build file reads it again" "2" "$(scans)"
+(cd "$REPO" && git checkout -q lib/a/build.gradle)
+check "a task that is in none of the modules is left out" "" "$(gb print testDebugUnitTest=:lib 2>/dev/null)"
+echo x > "$REPO/lib/notes.txt"
+check ":lib changed too" "$(printf ':lib\n:lib:a')" "$(gb changed)"
+check "auto leaves out modules without the task" "$P detekt :lib:a:testDebugUnitTest" "$(gb print auto 2> "$T/err")"
+contains "and says so" "$(cat "$T/err")" ":lib:testDebugUnitTest"
+tui "pick Unit tests" "esc" "esc" > /dev/null
+check "the modules screen lists only modules with the task" "0" "$(grep -cx ':lib' "$FAKE_FZF_LOG")"
+contains "and still the others" "$(cat "$FAKE_FZF_LOG")" "★ :lib:a"
+rm "$REPO/lib/notes.txt"
+rm -rf "$HOME/.cache/tb"; : > "$GRADLE_LOG"
+check "when Gradle can't list the tasks, modules are not checked" "$P :lib:testDebugUnitTest :lib:a:testDebugUnitTest" \
+  "$(GRADLE_SCAN_FAIL=1 gb print testDebugUnitTest=:lib,:lib:a 2>/dev/null)"
+GRADLE_SCAN_FAIL=1 gb print testDebugUnitTest=:lib 2>/dev/null >/dev/null
+check "and it does not ask Gradle again every time" "1" "$(scans)"
+check "refresh reads modules and tasks again" "5 modules, 12 tasks" "$(gb refresh 2>/dev/null)"
+check "and the tasks are back" "$P :lib:a:testDebugUnitTest" "$(gb print testDebugUnitTest=:lib,:lib:a 2>/dev/null)"
 
 echo "== list"
 out=$(gb list)
@@ -218,6 +271,84 @@ out=$(gb init 2>&1); rc=$?
 check "init never overwrites" "1" "$rc"
 contains "the written list mentions the optional runner line" "$(cat "$REPO/.tb")" "# runner: ./gradlew --continue --parallel --console=rich"
 check "the commented runner line changes nothing" "runner: $P" "$(gb list | sed -n 1p)"
+rm "$REPO/.tb"; out=$(TB_INTERACTIVE=1 gb init --defaults)
+contains "init --defaults writes the fixed list, even on a terminal" "$(cat "$REPO/.tb")" "# Popular extras"
+
+echo "== init: pick the tasks"
+rm "$REPO/.tb"
+cat > "$HOME/.zsh_history" <<'EOF'
+: 1700000000:0;./gradlew ktlintFormat
+: 1700000001:0;./gradlew ktlintFormat && ./gradlew :app:installDebug
+: 1700000002:0;./gradlew --offline -x lint --tests Foo koverHtmlReport
+: 1700000003:0;./gradlew tset
+EOF
+printf '%s\t%s\n' "$REPO" "$P detekt" "$T/elsewhere" "$P lintDebug" > "$HOME/.tb_history"
+initui() { printf '%s\n' "$@" > "$FAKE_FZF_SCRIPT"; : > "$FAKE_FZF_LOG"; (cd "$REPO" && TB_INTERACTIVE=1 "$TB" init < /dev/null 2>/dev/null); }
+: > "$GRADLE_LOG"
+out=$(initui "pick .")
+contains "init asks Gradle for the tasks, and the group and description of the ones it offers" "$(cat "$GRADLE_LOG")" "-Dtb.info="
+contains "init says what it wrote" "$out" "Wrote $REPO/.tb with 11 tasks."
+rows=$(cat "$FAKE_FZF_LOG")
+check "tasks run before come first, most run first" "ktlintFormat detekt installDebug koverHtmlReport" \
+  "$(grep '^\[' <<< "$rows" | grep '★' | awk '{ print $(NF) }' | tr '\n' ' ' | sed 's/ $//')"
+contains "with the times run, ticked, checks auto, not formatting" "$rows" "[x]      ★2    Ktlint: fix formatting"
+contains "tb's own history for this repo counts too" "$rows" "[x] auto ★1    Detekt (static analysis)"
+contains "a description from the plugin" "$rows" "Installs the Debug build"
+lacks "history typos are left out" "$rows" "tset"
+lacks "and options are not tasks" "$rows" "Foo"
+lacks "other tasks are hidden until you search" "$rows" "help"
+contains "the header says how to tick and set auto" "$rows" "TAB tick · CTRL-T auto on/off"
+tb_rows=$(grep -vE '^[[:space:]]*(#|$)' "$REPO/.tb")
+check "the written list, by step" "clean ktlintFormat recordPaparazziDebug detekt lintDebug ktlintCheck testDebugUnitTest verifyPaparazziDebug installDebug assembleDebug koverHtmlReport" \
+  "$(awk -F'|' '{ gsub(/ /, "", $3); printf "%s ", $3 }' <<< "$tb_rows" | sed 's/ $//')"
+contains "a task in one module runs on that module" "$tb_rows" "| installDebug         | :app"
+contains "a task in the root project is a whole-project task" "$tb_rows" "| detekt               | root   | auto"
+contains "a task in several modules is per module, checks and tests are auto" "$tb_rows" "| testDebugUnitTest    | module | auto"
+contains "the step comes from the group" "$tb_rows" "6 | Coverage report"
+contains "the file still explains itself" "$(cat "$REPO/.tb")" "# step   order things run in"
+check "tb reads what init wrote" "$P clean ktlintFormat && $P detekt" "$(gb print detekt ktlintFormat clean)"
+rm "$REPO/.tb"
+initui "esc" > /dev/null
+check "ESC writes nothing" "no" "$([ -e "$REPO/.tb" ] && echo yes || echo no)"
+cat > "$REPO/.tb" <<'EOF'
+runner: ./gradlew --offline
+# my notes
+4 | My tests     | testDebugUnitTest | module
+3 | Custom check | myCheck           | root   | auto
+EOF
+cp "$REPO/.tb" "$T/old.tb"
+out=$(initui "pick .")
+contains "with a .tb, init keeps the old one" "$out" "The old one is in .tb.bak"
+check ".tb.bak is the old file" "same" "$(cmp -s "$T/old.tb" "$REPO/.tb.bak" && echo same)"
+contains "its tasks are ticked" "$(cat "$FAKE_FZF_LOG")" "[x]            My tests"
+contains "the runner line is kept" "$(cat "$REPO/.tb")" "runner: ./gradlew --offline"
+contains "lines not in the list are kept" "$(cat "$REPO/.tb")" "3 | Custom check | myCheck           | root   | auto"
+contains "a task in the list keeps its label, where and auto" "$(cat "$REPO/.tb")" "4 | My tests | testDebugUnitTest | module"
+tb_rows=$(grep -vE '^[[:space:]]*(#|$)' "$REPO/.tb")
+lacks "the others are not ticked" "$tb_rows" "detekt"
+check "nothing from it is written twice" "1" "$(grep -c testDebugUnitTest <<< "$tb_rows")"
+rm -f "$REPO/.tb" "$REPO/.tb.bak" "$HOME/.zsh_history" "$HOME/.tb_history"
+
+echo "== init: TAB and CTRL-T (fzf callbacks)"
+export TB_INIT=$T/init; mkdir -p "$TB_INIT"; : > "$TB_INIT/query"
+printf 'detekt\t2\t0\tDetekt\troot\t3\t1\tRuns detekt\nhelp\t3\t0\thelp\troot\t5\t0\t\n' > "$TB_INIT/rows"
+printf 'detekt\t1\t1\nhelp\t0\t0\n' > "$TB_INIT/state"
+check "with no search, other tasks are hidden" "1" "$(gb __init_rows "" | wc -l | tr -d ' ')"
+check "a search shows them" "2" "$(gb __init_rows he | wc -l | tr -d ' ')"
+out=$(gb __init_key auto detekt "")
+contains "CTRL-T reloads the list in place" "$out" "reload-sync("
+contains "and keeps the cursor on the row" "$out" "+pos(1)"
+contains "CTRL-T turns auto off" "$(gb __init_rows "")" "[x]      "
+gb __init_key auto detekt "" > /dev/null
+contains "and on again" "$(gb __init_rows "")" "[x] auto"
+gb __init_key tick help "" > /dev/null
+check "a ticked other task shows without a search" "2" "$(gb __init_rows "" | wc -l | tr -d ' ')"
+gb __init_key tick detekt "" > /dev/null
+contains "TAB unticks" "$(gb __init_rows "")" "[ ]"
+contains "typing reloads the list once" "$(gb __init_change d)" "reload-sync("
+check "and not again while still typing" "" "$(gb __init_change de)"
+unset TB_INIT
+
 (cd "$REPO" && mv .tb.keep .tb)
 out=$(gb agents)
 contains "agents prints a note for AGENTS.md" "$out" "tb print"

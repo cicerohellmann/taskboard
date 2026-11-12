@@ -8,7 +8,7 @@ The style guide for the tb docs. Use these words, so we don't keep inventing new
 |---|---|
 | task | A Gradle task. Example: `testDebugUnitTest`. |
 | task list | The tasks tb shows. It comes from the `.tb` file. |
-| built-in task list | The task list tb uses when there is no `.tb` file. `tb init` writes it to `.tb`. |
+| built-in task list | The task list tb uses when there is no `.tb` file. `tb init --defaults` writes it to `.tb`. |
 | module task | A task you run on modules you pick. `where` is `module`. |
 | whole-project task | A task that runs on the whole project. `where` is `root`. Example: `clean`. |
 | fixed-module task | A task that always runs on one module. `where` is a module name. Example: `:app:assembleDebug`. |

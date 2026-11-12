@@ -44,7 +44,54 @@ One task per line:
 
 ### tb init
 
-`tb init` writes `.tb` with the built-in Android task list:
+`tb init` asks Gradle for every task of every module, and shows them in a list. You tick the tasks you want. ENTER writes them to `.tb`.
+
+- Gradle takes a few seconds. On a terminal, tb shows `Reading tasks from Gradle… 4s` while it waits.
+- Without a terminal, without `./gradlew`, or with `tb init --defaults`, it writes the built-in task list. See [tb init --defaults](#tb-init---defaults).
+- If Gradle can't list the tasks: with no `.tb`, it writes the built-in task list. With a `.tb`, it changes nothing and exits with 1.
+
+The rows, from the top:
+
+| Row | What it is |
+|---|---|
+| `[x]      ★2    Ktlint: fix formatting   ktlintFormat   root   Fixes Kotlin code style` | A task you ran before. `★2`: your shell history has it 2 times. Ticked. |
+| `[x] auto       Android lint             lintDebug      module` | A common Android task your project has. Ticked. |
+| `[ ]            help                     help           root` | Any other task. Shows only when you type a search, or when ticked. |
+
+The columns: tick, `auto`, `★` and runs, label, task, where, and the task's description from Gradle.
+
+- The shell history is `~/.zsh_history`, `~/.bash_history` and the tb history of this project. Only `./gradlew` and `gradlew` lines count. Names that are not a task in the project are left out.
+- The common Android tasks are the ones in the built-in task list and its comment lines: lint, unit tests, instrumented tests, APK builds, clean, Detekt, Ktlint, Spotless, Paparazzi, Roborazzi, Kover.
+- The description shows only for the first two kinds of rows.
+
+What tb writes for each ticked task:
+
+| Column | Value |
+|---|---|
+| step | The common Android tasks keep their step. Others: from the Gradle group and the name. `clean` 1, formatting 2, checks 3, tests 4, reports 6, the rest 5. |
+| label | The label from the built-in task list. Others: the task name. |
+| where | `root` if the root project has the task. A module name if only that module has it. `module` if several modules have it. |
+| auto | Ticked checks and tests (steps 3 and 4) are `auto`, except `connected...` tasks. CTRL-T changes it. |
+
+Keys:
+
+| Key | What it does |
+|---|---|
+| TAB | Ticks or unticks the task. |
+| CTRL-T | Turns `auto` on or off. Turning it on ticks the task. |
+| Type | Searches every task. |
+| ENTER | Writes `.tb`. |
+| ESC | Quits. Writes nothing. |
+
+With a `.tb` already:
+
+- Its tasks are ticked, with its step, label, where and `auto`. Nothing else is ticked.
+- ENTER copies it to `.tb.bak` first.
+- Its lines with a task that is not in the list are kept: your own tasks and the `runner:` line. Its comment lines are not kept. They are in `.tb.bak`.
+
+### tb init --defaults
+
+`tb init --defaults` writes `.tb` with the built-in Android task list. It does not ask Gradle.
 
 | step | label | task | where | auto |
 |---|---|---|---|---|
@@ -57,14 +104,14 @@ One task per line:
 | 1 | Clean | `clean` | root | |
 
 - It also writes comment lines for Detekt, Ktlint, Spotless, Paparazzi, Roborazzi and Kover. Remove the `#` to use them.
-- It writes the same list in every project. It does not read your project's tasks.
+- It writes the same list in every project.
 - If `.tb` exists, it exits with 1 and changes nothing.
 
 ### Where tb looks for the task list
 
 1. `.tb` in the project root.
 2. `~/.config/tb/commands`.
-3. The built-in Android task list. It is the same list `tb init` writes.
+3. The built-in Android task list. It is the same list `tb init --defaults` writes.
 
 ### Other files
 
@@ -72,7 +119,7 @@ One task per line:
 |---|---|
 | `~/.config/tb/presets/<project folder>/` | Presets. Projects with the same folder name share presets. |
 | `~/.tb_history` | History of the commands tb ran. |
-| `~/.cache/tb/` | The module list. tb reads it again when `settings.gradle` or `settings.gradle.kts` changes. `tb refresh` reads it again now. |
+| `~/.cache/tb/` | The module list and the tasks of each module. tb reads the module list again when `settings.gradle` or `settings.gradle.kts` changes. It reads the tasks again when a build file, `gradle.properties`, `gradle/*.toml`, `buildSrc` or `build-logic` changes. `tb refresh` reads both again now. |
 
 ## Step order
 
@@ -115,6 +162,7 @@ Auto runs the `auto` tasks on the affected modules.
 - `auto` module tasks run on the affected modules. They keep the modules they had already.
 - A task with ticked test classes keeps them. The affected modules it adds run all their tests.
 - `auto` whole-project tasks and fixed-module tasks are ticked as they are.
+- A module that does not have the task is left out. The main menu says `⚠ Skipped, no such task there: :settings:testDebugUnitTest`.
 - No changed modules: Auto ticks nothing. `tb run auto` and `tb print auto` exit with 1.
 
 Run Auto from the shell:
@@ -181,6 +229,7 @@ The lines above the rows:
 | `For: Unit tests` | The task. |
 | `★ changed · ☆ depends on a changed one · TAB tick · type to filter · CTRL-A tick all shown · ENTER next · ESC back` | The marks and the keys. |
 
+- The screen lists only the modules that have the task. If Gradle can't list the tasks, it lists every module.
 - The modules the task already has are ticked when the screen opens. Untick a module to remove it.
 - `◆ CHANGED AND DEPENDENT MODULES` adds the same modules as `tb affected`.
 - CTRL-A ticks every row shown. Type to filter first to tick only some rows.
@@ -266,8 +315,9 @@ The lines above the rows:
 | `tb history` | Lists this project's last 20 commands, without repeats, newest last. |
 | `tb last` | Runs this project's last command again. |
 | `tb hist` | Opens a menu of this project's commands. Runs the one you pick. |
-| `tb init` | Writes `.tb`. Exits with 1 if `.tb` exists. See [tb init](#tb-init). |
-| `tb refresh` | Reads the module list again. Prints the number of modules. |
+| `tb init` | Opens a list of the project's tasks. ENTER writes the ticked ones to `.tb`. See [tb init](#tb-init). |
+| `tb init --defaults` | Writes the built-in task list to `.tb`. Exits with 1 if `.tb` exists. See [tb init --defaults](#tb-init---defaults). |
+| `tb refresh` | Reads the modules and their tasks again. Prints the number of modules and tasks. |
 | `tb agents` | Prints a note for AGENTS.md or CLAUDE.md. |
 | `tb help` | Prints the help. Same as `tb -h` and `tb --help`. |
 
@@ -290,6 +340,7 @@ tb print clean detekt testDebugUnitTest=changed
 # ./gradlew --continue --parallel --console=rich clean && ./gradlew --continue --parallel --console=rich :garden:testDebugUnitTest :notes:editor:testDebugUnitTest detekt
 ```
 
+- A module that does not have the task is left out. tb prints `Skipped, no such task there: :settings:testDebugUnitTest` on stderr.
 - A task that is not in the task list goes to the build as it is, last. Anything after `=` is dropped.
 - The same module task twice runs on both sets of modules: `lintDebug=:a lintDebug=:b` is `lintDebug=:a,:b`.
 - An error exits with 1 and says what is wrong. Errors: an unknown module, a module task with no `=`, an unknown preset, no SPEC, an unknown command, Auto with no changed modules.
@@ -319,8 +370,9 @@ The default runner is `./gradlew --continue --parallel --console=rich`.
 
 These are not fixed yet.
 
-- A module that does not have the task makes the whole build fail. Gradle says `Cannot locate tasks that match ':module:task'`. This happens when you pick such a module by hand, or when Auto adds it. Example: a Paparazzi task on a module without Paparazzi.
-- The modules screen can list a folder that has no build file. It is not a real module, so a task on it fails the same way.
-- `◆ ALL MODULES` and `task=ALL` are not affected. tb writes the task with no module in front, and Gradle runs it only in the modules that have it.
+- `◆ ALL MODULES` and `task=ALL` write the task with no module in front. Gradle runs it only in the modules that have it.
 - A whole-project task or a fixed-module task ignores `=modules`. `tb print installDebug=:x` prints `:app:installDebug`, with no error.
-- The first run in a project shows `Reading the module list from Gradle (only after settings change)...` and no progress until Gradle is done.
+- If Gradle can't list the tasks, tb does not know which module has which task. Then a module that does not have the task makes the whole build fail. Gradle says `Cannot locate tasks that match ':module:task'`.
+- `tb init` asks Gradle every time, even when the tasks are in `~/.cache/tb/`. It needs the descriptions, and they are not cached.
+- In `tb init`, the other tasks (not ticked, not common) have no description.
+- `tb init` does not keep the comment lines of the old `.tb`. They are in `.tb.bak`.

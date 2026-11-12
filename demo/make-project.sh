@@ -21,6 +21,19 @@ if [ "$*" = "-q projects" ]; then
   printf "Root project 'notes'\n+--- Project ':app'\n+--- Project ':garden'\n+--- Project ':notes'\n|    +--- Project ':notes:editor'\n|    \\\\--- Project ':notes:list'\n\\\\--- Project ':settings'\n"
   exit 0
 fi
+case "$*" in *--init-script*) # tb reading the tasks (DEMO_SLEEP=3 makes it slow)
+  sleep "${DEMO_SLEEP:-0}"
+  for t in clean detekt ktlintCheck ktlintFormat koverHtmlReport help; do echo "TBTASK : $t"; done
+  for t in testDebugUnitTest lintDebug assembleDebug assembleRelease installDebug clean; do echo "TBTASK :app $t"; done
+  for t in testDebugUnitTest lintDebug verifyPaparazziDebug recordPaparazziDebug clean; do echo "TBTASK :notes:editor $t"; done
+  for m in :notes:list :garden; do for t in testDebugUnitTest lintDebug clean; do echo "TBTASK $m $t"; done; done
+  for t in lintDebug clean; do echo "TBTASK :settings $t"; done
+  echo "TBTASK :notes clean"
+  echo "TBINFO|ktlintFormat|formatting|Fixes Kotlin code style"
+  echo "TBINFO|testDebugUnitTest|verification|Run unit tests for the debug build"
+  echo "TBINFO|installDebug|Install|Installs the Debug build"
+  exit 0 ;;
+esac
 for t in "$@"; do
   case "$t" in -*) continue ;; esac
   printf '\e[1m> Task %s\e[0m\n' "${t#:}" | sed 's/> Task \([^:]\)/> Task :\1/'
