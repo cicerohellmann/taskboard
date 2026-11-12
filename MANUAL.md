@@ -10,6 +10,7 @@ Every detail of tb. To install tb and start, read the [README](README.md). The w
 - [Keys](#keys)
 - [Commands for scripts](#commands-for-scripts)
 - [Not only Gradle](#not-only-gradle)
+- [Known issues](#known-issues)
 
 ## The .tb file
 
@@ -149,7 +150,7 @@ The rows, from the top:
 | `💾 Save as preset` | Opens the save screen. |
 | `★ Auto: checks on changed modules and their dependents (:garden, :notes:editor)` | Ticks the `auto` tasks. See [Auto](#auto). Shows only when there are changed modules. |
 | `  Instrumented tests (needs a device)` | A task, not ticked. ENTER opens its modules screen. |
-| `✓ Unit tests  → :garden, :notes:editor · 1 test class` | A ticked module task, with its modules and test classes. ENTER opens its modules screen again. |
+| `✓ Unit tests  → :garden, :notes:editor · 1 test class` | A ticked module task, with the modules it runs on and the number of test classes it gets. ENTER opens its modules screen again. |
 | `✓ Clean  → whole project` | A ticked whole-project task. ENTER unticks it. |
 
 The lines above the rows:
@@ -159,6 +160,8 @@ The lines above the rows:
 | `★ Added the auto checks; module ones on :garden, :notes:editor` | What the last action did. |
 | `./gradlew --continue --parallel --console=rich :garden:lintDebug :notes:editor:lintDebug` | The command that will run. |
 | `then ./gradlew ...` | The second `./gradlew` call, when steps 1 or 2 are ticked. |
+
+- When you come back to the main menu, the cursor is on the row you ticked last.
 
 ### Modules screen
 
@@ -178,7 +181,7 @@ The lines above the rows:
 | `For: Unit tests` | The task. |
 | `★ changed · ☆ depends on a changed one · TAB tick · type to filter · CTRL-A tick all shown · ENTER next · ESC back` | The marks and the keys. |
 
-- The modules the task already has are ticked when the screen opens.
+- The modules the task already has are ticked when the screen opens. Untick a module to remove it.
 - `◆ CHANGED AND DEPENDENT MODULES` adds the same modules as `tb affected`.
 - CTRL-A ticks every row shown. Type to filter first to tick only some rows.
 - ENTER keeps the ticked modules.
@@ -202,6 +205,7 @@ The lines above the rows:
 - A module with none of the ticked test classes is dropped from the task.
 - Paparazzi tasks get only screenshot test classes.
 - A Paparazzi task runs the unit test task of its module, and Gradle runs a task once. So test tasks on the same module as a Paparazzi task get the same test classes: all ticked classes, or all tests if one of them has all.
+- The test classes the task already has are ticked when the screen opens.
 - CTRL-A ticks every row shown. Type to filter first to tick only some rows.
 - ESC keeps the test classes you had before.
 
@@ -212,6 +216,8 @@ The lines above the rows:
 | `./gradlew ... clean && ./gradlew ... :notes:editor:testDebugUnitTest` | The command. |
 | `✖ Cancel, back` | Goes back to the main menu. |
 | `✔ Confirm, run it` | Runs the command. |
+
+- A long command is shown on several lines. Nothing is cut.
 
 ### Save screen
 
@@ -228,6 +234,8 @@ The lines above the rows:
 |---|---|
 | `▶ Run it` | Runs the preset's command. |
 | `🗑 Delete preset` | Asks, then deletes the preset. |
+
+- The lines above the rows show the preset's tasks and its command. A long command is shown on several lines.
 
 ## Keys
 
@@ -306,3 +314,13 @@ runner: make -k
 - No `./gradlew` and no `runner:` line: tb exits with 1.
 
 The default runner is `./gradlew --continue --parallel --console=rich`.
+
+## Known issues
+
+These are not fixed yet.
+
+- A module that does not have the task makes the whole build fail. Gradle says `Cannot locate tasks that match ':module:task'`. This happens when you pick such a module by hand, or when Auto adds it. Example: a Paparazzi task on a module without Paparazzi.
+- The modules screen can list a folder that has no build file. It is not a real module, so a task on it fails the same way.
+- `◆ ALL MODULES` and `task=ALL` are not affected. tb writes the task with no module in front, and Gradle runs it only in the modules that have it.
+- A whole-project task or a fixed-module task ignores `=modules`. `tb print installDebug=:x` prints `:app:installDebug`, with no error.
+- The first run in a project shows `Reading the module list from Gradle (only after settings change)...` and no progress until Gradle is done.

@@ -53,7 +53,7 @@ default_commands='# step | label | gradle task | where | auto
 #        1 clean · 2 changes files · 3 checks · 4 tests · 5 build · 6 reports
 #        steps 1-2 run as their own build first, so nothing reads files they are still changing
 # where  module = you pick the modules · root = whole project, just a tick · :app = always that module
-# auto   "auto" = added by ★ Auto, on the modules changed on this branch
+# auto   "auto" = added by ★ Auto, on the modules changed on this branch and the modules that depend on them
 #
 # runner (optional) is what the tasks are added to. For other build tools, e.g. make or just:
 # runner: ./gradlew --continue --parallel --console=rich
@@ -491,7 +491,7 @@ one command line that runs them in the right order (clean, formatting, checks, t
              ktlint, unit tests...) on them
   by hand    or pick each command, its modules and its test classes yourself
 
-Menu keys: ENTER open/tick · TAB tick several · ESC back/quit · DEL delete preset
+Menu keys: ENTER open/tick · TAB tick several · CTRL-A tick all shown · ESC back/quit · DEL delete preset
 
 Commands from $from
 Runner: $gradle_prefix

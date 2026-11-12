@@ -42,3 +42,4 @@ The style guide for the tb docs. Use these words, so we don't keep inventing new
 | [MANUAL.md](../MANUAL.md) | Every detail. |
 | [docs/AI.md](AI.md) | What an AI agent needs to use tb or to work on this repo. |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | How to change tb and run its tests. |
+| [CHANGELOG.md](../CHANGELOG.md) | What changed in each version: New, Fixed, Known issues. |

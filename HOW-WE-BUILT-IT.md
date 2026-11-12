@@ -61,6 +61,7 @@ Each line is something the author asked for, and what was built for it. Quotes a
 - **A crash.** Auto crashed with a "Broken pipe" error. "Also before you publish anything, just check if every command works because it just crashed." The crash was fixed.
 - **Affected modules.** At first, Auto ran only on the changed modules. The author asked "is there anything like this tool out there?" The search found Gradle plugins that also find the modules that depend on the changed ones. The author then asked: "check the modules that depend on that module for the auto". So Auto now also finds the modules that depend on the changed modules, and runs there too.
 - **Review.** "I want some sub-agents to scrutinize the readme." AI agents checked the README against the code.
+- **Field test.** A field test found seven bugs. They are fixed in 0.3.0. [CHANGELOG.md](CHANGELOG.md) lists them, and the known issues that are not fixed yet.
 
 ## Other people's code
 
@@ -170,6 +171,7 @@ Develocity has nothing about affected modules or picking tasks. It works at the 
 - tb has no cache. Nx, Turborepo and moon skip tasks whose inputs did not change.
 - tb picks whole modules. Develocity Predictive Test Selection, affected-tests and NGM TestRunner pick only the tests linked to the change.
 - tb has no file watching and no pre-commit hook setup. fnug has both.
+- tb does not check that a module has a task before it puts the task in the command. See [Known issues](MANUAL.md#known-issues).
 
 ## References
 

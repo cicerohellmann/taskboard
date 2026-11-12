@@ -47,6 +47,9 @@ SPEC is one of:
 
 - A module task needs `=`. `tb print testDebugUnitTest` is an error.
 - A task that is not in the task list goes to the build as it is, last.
+- The same module task twice runs on both sets of modules: `lintDebug=:a lintDebug=:b` is `lintDebug=:a,:b`.
+- A module that does not have the task makes the whole build fail. Use `=ALL` for a task that only some modules have. See [Known issues](../MANUAL.md#known-issues).
+- A whole-project or fixed-module task ignores `=modules`.
 - An error exits with 1 and says what is wrong.
 
 ### Find names
@@ -58,7 +61,7 @@ SPEC is one of:
 | `tb changed` | The modules with a changed file on this branch. |
 | `tb affected` | The changed modules and the modules that depend on them. |
 | `tb presets` | This project's presets, and the command each one runs. |
-| `tb history` | This project's last 20 commands. |
+| `tb history` | This project's last 20 commands, without repeats, newest last. |
 | `tb help` | The help. |
 
 Full details: [MANUAL.md](../MANUAL.md#commands-for-scripts).

@@ -13,7 +13,8 @@ I've always had trouble with long custom commands that always keep changing, spe
 | Doc | What is in it |
 |---|---|
 | [README.md](README.md) | How to install tb and how to use it. |
-| [MANUAL.md](MANUAL.md) | Every detail: the `.tb` file, the menu row by row, the keys, the step order, the commands for scripts. |
+| [MANUAL.md](MANUAL.md) | Every detail: the `.tb` file, the menu row by row, the keys, the step order, the commands for scripts, the [known issues](MANUAL.md#known-issues). |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version. |
 | [docs/AI.md](docs/AI.md) | For AI agents: how to run tb and how to set up `.tb`. |
 | [docs/WORDS.md](docs/WORDS.md) | For people who write these docs: the words to use. |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to change tb and run its tests. |
