@@ -443,7 +443,7 @@ one command line that runs them in the right order (clean, formatting, checks, t
   ★ Auto     the main path: finds the modules changed on your branch, and the modules that
              depend on them, and runs the standard tools marked "auto" in .tb (lint, detekt,
              ktlint, unit tests...) on them
-  by hand    or go deep: choose each command, its modules and its test classes yourself
+  by hand    or pick each command, its modules and its test classes yourself
 
 Menu keys: ENTER open/tick · TAB tick several · ESC back/quit · DEL delete preset
 

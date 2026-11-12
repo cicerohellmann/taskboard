@@ -86,7 +86,7 @@ out=$(gb -h)
 contains "help says what tb is" "$out" "a task board for Gradle"
 contains "help puts Auto first, on changed modules" "$out" "★ Auto     the main path: finds the modules changed on your branch"
 contains "help says Auto runs the tools marked auto" "$out" 'marked "auto" in .tb'
-contains "help mentions going deep by hand" "$out" "its modules and its test classes"
+contains "help mentions picking by hand" "$out" "its modules and its test classes"
 contains "help lists the menu keys" "$out" "ENTER open/tick · TAB tick several · ESC back/quit · DEL delete preset"
 for sub in print run list modules changed presets history last hist init refresh agents help; do
   contains "help lists tb $sub" "$out" "  tb $sub "
