@@ -606,6 +606,12 @@ check "fzf older than 0.46 is refused" "1" "$rc"
 contains "and says which version it found" "$out" "this is 0.45.0"
 check "print works without fzf at all" "$P detekt" "$(PATH="$T/oldbin:$PATH" gb print detekt)"
 
+echo "== a project with no settings file"
+BARE=$T/bare; mkdir -p "$BARE" && git -C "$BARE" init -q
+printf '#!/bin/sh\necho "+--- Project '"'"':app'"'"'"\n' > "$BARE/gradlew" && chmod +x "$BARE/gradlew"
+check "print still works" "$P clean && $P :app:assembleDebug" "$(cd "$BARE" && "$TB" print clean assembleDebug 2>/dev/null)"
+check "modules come from Gradle" ":app" "$(cd "$BARE" && "$TB" modules 2>/dev/null)"
+
 echo
 echo "$passed passed, $failed failed"
 [ "$failed" = 0 ]

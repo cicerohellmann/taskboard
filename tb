@@ -109,14 +109,14 @@ gradle_wait() { # message outfile command...
 load_modules() {
   local key cache="$cache_base.modules" out
   mkdir -p "$cache_dir"
-  key=$(cat settings.gradle* 2>/dev/null | cksum | cut -d' ' -f1)
+  key=$({ cat settings.gradle* 2>/dev/null || true; } | cksum | cut -d' ' -f1)
   if [ "${1:-}" != refresh ] && [ -f "$cache" ] && [ "$(head -1 "$cache")" = "$key" ]; then all_modules=$(sed 1d "$cache"); return; fi
   out=$(mktemp "${TMPDIR:-/tmp}/tb.XXXXXX")
   gradle_wait "Reading the module list from Gradle (only after settings change)" "$out" ./gradlew -q projects || true
   all_modules=$(sed -nE "s/.*Project '(:[^']+)'.*/\1/p" "$out" | awk '!seen[$0]++')
   rm -f "$out"
   if [ -z "$all_modules" ]; then # Gradle failed: fall back to the include lines
-    all_modules=$(sed -nE "s/^[[:space:]]*include[[:space:]]*\(?[\"']([^\"']+)[\"'].*/\1/p" settings.gradle* | awk '!seen[$0]++')
+    all_modules=$(sed -nE "s/^[[:space:]]*include[[:space:]]*\(?[\"']([^\"']+)[\"'].*/\1/p" settings.gradle* 2>/dev/null | awk '!seen[$0]++' || true)
   else
     printf '%s\n%s\n' "$key" "$all_modules" > "$cache"
   fi
