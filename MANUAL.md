@@ -112,6 +112,7 @@ Auto runs the `auto` tasks on the affected modules.
 ### What Auto ticks
 
 - `auto` module tasks run on the affected modules. They keep the modules they had already.
+- A task with ticked test classes keeps them. The affected modules it adds run all their tests.
 - `auto` whole-project tasks and fixed-module tasks are ticked as they are.
 - No changed modules: Auto ticks nothing. `tb run auto` and `tb print auto` exit with 1.
 
@@ -200,6 +201,7 @@ The lines above the rows:
 - Test classes are the `*Test.kt` and `*Tests.kt` files in `src/test`.
 - A module with none of the ticked test classes is dropped from the task.
 - Paparazzi tasks get only screenshot test classes.
+- A Paparazzi task runs the unit test task of its module, and Gradle runs a task once. So test tasks on the same module as a Paparazzi task get the same test classes: all ticked classes, or all tests if one of them has all.
 - CTRL-A ticks every row shown. Type to filter first to tick only some rows.
 - ESC keeps the test classes you had before.
 
@@ -253,7 +255,7 @@ The lines above the rows:
 | `tb changed` | Lists the changed modules. |
 | `tb affected` | Lists the affected modules. |
 | `tb presets` | Lists this project's presets. |
-| `tb history` | Lists this project's last 20 commands, without repeats. |
+| `tb history` | Lists this project's last 20 commands, without repeats, newest last. |
 | `tb last` | Runs this project's last command again. |
 | `tb hist` | Opens a menu of this project's commands. Runs the one you pick. |
 | `tb init` | Writes `.tb`. Exits with 1 if `.tb` exists. See [tb init](#tb-init). |
@@ -281,6 +283,7 @@ tb print clean detekt testDebugUnitTest=changed
 ```
 
 - A task that is not in the task list goes to the build as it is, last. Anything after `=` is dropped.
+- The same module task twice runs on both sets of modules: `lintDebug=:a lintDebug=:b` is `lintDebug=:a,:b`.
 - An error exits with 1 and says what is wrong. Errors: an unknown module, a module task with no `=`, an unknown preset, no SPEC, an unknown command, Auto with no changed modules.
 
 For AI agents, [docs/AI.md](docs/AI.md) says which of these to use.

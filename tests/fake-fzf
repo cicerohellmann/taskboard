@@ -15,13 +15,17 @@ case "${1:-}" in
 esac
 
 rows=$(cat)
-expect=0 print_query=0
+expect=0 print_query=0 sync=0 start=0
 for arg in "$@"; do
   case "$arg" in
     --expect=*) expect=1 ;;
     --print-query) print_query=1 ;;
+    --sync) sync=1 ;;
+    --bind=start:*) start=1 ;;
   esac
 done
+# Real fzf runs start binds before the rows are loaded, unless --sync: pos() and toggle do nothing
+if [ "$start" = 1 ] && [ "$sync" = 0 ]; then echo "fake-fzf: --bind=start: without --sync does nothing in real fzf" >&2; exit 2; fi
 printf '%s\n%s\n' "$*" "$rows" >> "$FAKE_FZF_LOG"
 
 step=$(sed -n 1p "$FAKE_FZF_SCRIPT")

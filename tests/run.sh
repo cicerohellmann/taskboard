@@ -131,6 +131,8 @@ check "fixed-module tasks get their module" "$P :app:assembleDebug" "$(gb print 
 check "auto adds the auto checks on changed modules" "$P detekt :lib:a:testDebugUnitTest" "$(gb print auto)"
 check "tasks not in the list pass through" "$P detekt :app:bundleRelease" "$(gb print :app:bundleRelease detekt)"
 check "the same task twice is added once" "$P detekt" "$(gb print detekt detekt)"
+check "a module task twice runs on both sets of modules" "$P :lib:a:testDebugUnitTest :lib:b:testDebugUnitTest" \
+  "$(gb print testDebugUnitTest=:lib:a testDebugUnitTest=:lib:b)"
 
 echo "== mistakes say what's wrong and exit 1"
 out=$(gb print testDebugUnitTest 2>&1); rc=$?
@@ -198,10 +200,12 @@ check "history keeps it" "$P detekt :app:assembleDebug" "$(gb history)"
 check "last runs it again" "--continue --parallel --console=rich detekt :app:assembleDebug" "$(gradle_runs)"
 gb run clean > /dev/null
 check "history lists each command once, newest last" "$(printf '%s\n' "$P detekt :app:assembleDebug" "$P clean")" "$(gb history)"
+gb last > /dev/null; gb run detekt assembleDebug > /dev/null
+check "a command run again moves to the end" "$(printf '%s\n' "$P clean" "$P detekt :app:assembleDebug")" "$(gb history)"
 printf '%s\n' "pick detekt" > "$FAKE_FZF_SCRIPT"; : > "$FAKE_FZF_LOG"; : > "$GRADLE_LOG"
 gb hist > /dev/null
 check "hist runs the picked command" "--continue --parallel --console=rich detekt :app:assembleDebug" "$(gradle_runs)"
-check "hist lists newest first" "$P clean" "$(sed -n 2p "$FAKE_FZF_LOG")"
+check "hist lists newest first" "$P detekt :app:assembleDebug" "$(sed -n 2p "$FAKE_FZF_LOG")"
 printf 'esc\n' > "$FAKE_FZF_SCRIPT"; : > "$GRADLE_LOG"
 gb hist > /dev/null; rc=$?
 check "hist with ESC runs nothing" "0/" "$rc/$(gradle_runs)"
@@ -270,6 +274,27 @@ contains "and says why" "$(cat "$FAKE_FZF_LOG")" "Tick a command first"
 tui "pick Unit tests" "pickall :lib:a$" "esc" "pick Unit tests" "esc" "esc" > /dev/null
 contains "reopening a command starts with its modules ticked" "$(cat "$FAKE_FZF_LOG")" "+toggle"
 contains "and offers to remove it" "$(cat "$FAKE_FZF_LOG")" "Remove Unit tests from the list"
+
+contains "and fzf loads the rows before ticking them (--sync)" "$(grep -F -- '+toggle' "$FAKE_FZF_LOG")" "--sync"
+
+tui "pick Unit tests" "pickall :lib:a$|:lib:b$" "pick ATest" "esc" > /dev/null
+contains "a test command lists only the modules that own a picked class" "$(cat "$FAKE_FZF_LOG")" "✓ Unit tests  → :lib:a · 1 test class"
+
+tui "pickall Unit tests|Screenshot tests" "pickall :lib:b$" "pickall Test" "pick ▶ Run" "pick Confirm" > /dev/null
+check "unit and screenshot tests on one module share their test classes (one build runs the test task once)" \
+  "--continue --parallel --console=rich :lib:b:testDebugUnitTest --tests *.BScreenshotTest --tests *.BTest :lib:b:verifyPaparazziDebug --tests *.BScreenshotTest --tests *.BTest" \
+  "$(gradle_runs)"
+tui "pick Unit tests" "pickall :lib:b$" "pick BTest" "pick Screenshot tests" "pickall :lib:b$" "pick ◆ ALL tests" "pick ▶ Run" "pick Confirm" > /dev/null
+check "and if one of them runs all tests, both do" \
+  "--continue --parallel --console=rich :lib:b:testDebugUnitTest :lib:b:verifyPaparazziDebug" "$(gradle_runs)"
+
+tui "pick Unit tests" "pickall :lib:b$" "pick BTest" "pick ★ Auto" "pick ▶ Run" "pick Confirm" > /dev/null
+check "Auto after picking a test class still runs all tests in the modules it adds" \
+  "--continue --parallel --console=rich detekt :lib:b:testDebugUnitTest --tests *.BTest :lib:a:testDebugUnitTest" "$(gradle_runs)"
+
+COLUMNS=60 tui "pick Detekt" "pick Build debug" "pick Clean" "pick Ktlint" "pick ▶ Run" "pick Cancel" "esc" > /dev/null
+check "the run screen cuts a long command into lines that fit" "yes" \
+  "$(awk '/--prompt=run\? >/ { f=1 } f && /^  / { n++ } END { print (n >= 1 ? "yes" : "no") }' "$FAKE_FZF_LOG")"
 
 tui "pick Unit tests" "pickall :lib:a$" "esc" "pick Unit tests" "pick ✖ Remove" "pick ▶ Run" "esc" > /dev/null
 check "removing a command takes it off the list" "" "$(gradle_runs)"
