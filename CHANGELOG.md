@@ -2,6 +2,10 @@
 
 What changed in each version of tb. The words are in [docs/WORDS.md](docs/WORDS.md).
 
+## Not released yet
+
+- [README.md](README.md#update) explains how to update tb.
+
 ## 0.3.0 (2026-11-12)
 
 ### New

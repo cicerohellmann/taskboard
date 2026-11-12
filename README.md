@@ -38,6 +38,25 @@ curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/insta
 
 The installer puts `tb` in `~/.local/bin` (set `TB_BIN` for another folder). If fzf is missing or older than 0.46, it installs fzf too. It needs `curl` and `git`.
 
+## Update
+
+With Homebrew:
+
+```sh
+brew update
+brew upgrade tb
+```
+
+Without Homebrew, run the install command again. It replaces the old `tb`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/cicerohellmann/taskboard/main/install.sh | bash
+```
+
+Updating replaces only the `tb` script. Your `.tb` file, presets and history stay as they are.
+
+To see your version with Homebrew: `brew list --versions tb`. [CHANGELOG.md](CHANGELOG.md) lists what changed in each version.
+
 ## Use it
 
 Type `tb` in a project with `./gradlew`. The menu opens. There are two ways to use it.
