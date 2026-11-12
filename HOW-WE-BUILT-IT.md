@@ -4,7 +4,7 @@
 
 I've always had trouble with long custom commands that always keep changing, specially in big projects.
 
-The first ask was a "DJ board": all the commands in one place, and a list to pick the modules each command runs on. "Cause its so hard for me to remember this shit".
+The first ask was a "DJ board": all the commands in one place, and a list to pick the modules each command runs on. "Cause its so hard for me to remember".
 
 ## Words used below
 
@@ -42,8 +42,8 @@ Each line is something the author asked for, and what was built for it. Quotes a
 | "a prompt suggestion to look into the command history of the project and do the auto setup" | [docs/AI.md](docs/AI.md) has a prompt to paste into an AI agent. The agent reads the shell history and CI files and writes `.tb`. |
 | "We should also have a -h that explains what it does." | `tb -h` (or `tb help`) says what tb is and lists its commands. |
 | "Make it clear this was designed for usage with Gradle but this can be used with anything else." | A `runner:` line in `.tb` replaces `./gradlew` with another tool, like `make` or `just`. Without Gradle there are no modules, so every task runs on the whole project. |
-| "I can't stress it more, I want fucking tests" | `tests/run.sh` builds a small fake Gradle project and swaps fzf for a script that presses the keys. The tests run with no Gradle, no Android SDK and no terminal. |
-| "I also want a license to enable anyone to copy this shit and do whatever the fuck they want with it." | The AI picked the Unlicense because it does that: anyone can copy, change and sell the code. |
+| "I can't stress it more, I want tests" | `tests/run.sh` builds a small fake Gradle project and swaps fzf for a script that presses the keys. The tests run with no Gradle, no Android SDK and no terminal. |
+| "I also want a license to enable anyone to copy this and do whatever they want with it." | The AI picked the Unlicense because it does that: anyone can copy, change and sell the code. |
 
 ## Where things are kept
 
